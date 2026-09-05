@@ -7,9 +7,25 @@ from core.deployer import LabDeployer
 from core.grader import LabGrader
 from core.wizard import QuestionnaireWizard
 from core.models import Difficulty, Domain
+from core.recorder import recorder
+
+
+def _load_env():
+    env_file = Path(__file__).parent.parent / ".env"
+    if env_file.exists():
+        try:
+            with open(env_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        os.environ.setdefault(k.strip(), v.strip())
+        except Exception:
+            pass
 
 
 def main():
+    _load_env()
     loader = QuestionLoader()
     deployer = LabDeployer()
     grader = LabGrader()
@@ -76,8 +92,26 @@ def main():
     # Reset
     subparsers.add_parser("reset", help="Reset active session and clean cluster resources")
 
-    # Preflight
+    # Recordings, Replay & Review
+    recordings_parser = subparsers.add_parser("recordings", help="List recorded candidate exam sessions")
+    recordings_parser.add_argument("subcmd", nargs="?", default="list", choices=["list"], help="Subcommand (default: list)")
+
+    review_parser = subparsers.add_parser("review", help="Review candidate session recording and event timeline")
+    review_parser.add_argument("session_id", nargs="?", help="Session ID (defaults to latest recorded session)")
+
+    replay_parser = subparsers.add_parser("replay", help="Replay terminal recording in CLI via asciinema")
+    replay_parser.add_argument("session_id", nargs="?", help="Session ID (defaults to latest recorded session)")
+    replay_parser.add_argument("--speed", type=float, default=1.0, help="Playback speed multiplier (default: 1.0)")
+
+    record_shell_parser = subparsers.add_parser("record-shell", help="Run an interactive recorded shell attached to active session")
+    record_shell_parser.add_argument("--session-id", help="Session ID (defaults to active session)")
+    record_shell_parser.add_argument("shell_args", nargs=argparse.REMAINDER, help="Optional shell command to run")
+
+    # Preflight & Configuration
     subparsers.add_parser("preflight", help="Run preflight environment verification")
+    configure_parser = subparsers.add_parser("configure", help="Interactive environment configuration & preflight setup wizard")
+    configure_parser.add_argument("-y", "--yes", action="store_true", help="Non-interactive mode (accept all auto-detected defaults)")
+    configure_parser.add_argument("--force", action="store_true", help="Overwrite existing .env without confirmation")
 
     # Web UI Server
     web_parser = subparsers.add_parser("web", help="Start the CKA Exam Web Simulator server")
@@ -195,6 +229,11 @@ def main():
         if target_q.id not in session.flagged:
             session.flagged.append(target_q.id)
             deployer.save_session(session)
+            try:
+                recorder.attach_or_resume(session.session_id, session.name)
+                recorder.log_event("TASK_FLAGGED", {"task_num": idx + 1, "question_id": target_q.id, "title": target_q.title})
+            except Exception:
+                pass
         print(f"🚩 Task {idx + 1} ({target_q.id}: {target_q.title}) flagged for review.")
 
     elif args.command == "unflag":
@@ -210,6 +249,11 @@ def main():
         if target_q.id in session.flagged:
             session.flagged.remove(target_q.id)
             deployer.save_session(session)
+            try:
+                recorder.attach_or_resume(session.session_id, session.name)
+                recorder.log_event("TASK_UNFLAGGED", {"task_num": idx + 1, "question_id": target_q.id, "title": target_q.title})
+            except Exception:
+                pass
         print(f"Task {idx + 1} ({target_q.id}) unflagged.")
 
     elif args.command == "status":
@@ -226,6 +270,11 @@ def main():
             print("[Warning] No active exam session found.")
             sys.exit(1)
 
+        try:
+            recorder.attach_or_resume(session.session_id, session.name)
+        except Exception:
+            pass
+
         if args.id:
             target_q = next((q for q in session.questions if q.id == args.id), None)
             if not target_q:
@@ -234,6 +283,16 @@ def main():
             res = grader.grade_question(target_q)
             session.scores[target_q.id] = {"passed": res.passed, "score": res.score, "max_score": res.max_score, "message": res.message}
             deployer.save_session(session)
+            try:
+                recorder.log_event("TASK_EVALUATION", {
+                    "question_id": target_q.id,
+                    "score": res.score,
+                    "max_score": res.max_score,
+                    "passed": res.passed,
+                    "message": res.message,
+                })
+            except Exception:
+                pass
             print(f"[{'PASS' if res.passed else 'FAIL'}] {args.id} ({res.score}/{res.max_score} pts): {res.message}")
         elif session.mode == "sequential" and not args.all:
             cur_q = session.current_question
@@ -241,6 +300,17 @@ def main():
                 res = grader.grade_question(cur_q)
                 session.scores[cur_q.id] = {"passed": res.passed, "score": res.score, "max_score": res.max_score, "message": res.message}
                 deployer.save_session(session)
+                try:
+                    recorder.log_event("TASK_EVALUATION", {
+                        "task_num": session.current_index + 1,
+                        "question_id": cur_q.id,
+                        "score": res.score,
+                        "max_score": res.max_score,
+                        "passed": res.passed,
+                        "message": res.message,
+                    })
+                except Exception:
+                    pass
                 print(f"\nTask {session.current_index + 1}/{len(session.questions)} Evaluation: [{cur_q.id}] {cur_q.title}")
                 print(f"[{'PASS' if res.passed else 'FAIL'}] Score: {res.score}/{res.max_score} pts - {res.message}")
                 if session.current_index + 1 < len(session.questions):
@@ -260,6 +330,20 @@ def main():
                 deployer.save_session(session)
             summaries = grader.grade_session(session)
             grader.render_scorecard(summaries)
+            try:
+                tot_earned = sum(s.result.score for s in summaries)
+                tot_possible = sum(s.result.max_score for s in summaries)
+                pct = (tot_earned / tot_possible * 100) if tot_possible > 0 else 0.0
+                recorder.finish_session(
+                    session_id=session.session_id,
+                    scorecard=[{"task_num": s.task_num, "id": s.question.id, "score": s.result.score, "max_score": s.result.max_score, "passed": s.result.passed} for s in summaries],
+                    percentage=round(pct, 1),
+                    passed=pct >= 66.0,
+                    total_earned=tot_earned,
+                    total_possible=tot_possible,
+                )
+            except Exception:
+                pass
 
     elif args.command == "tasks":
         session = deployer.load_active_session(loader)
@@ -297,6 +381,29 @@ def main():
     elif args.command == "reset":
         deployer.clear_session()
         print("Active session cleared.")
+
+    elif args.command == "recordings":
+        recorder.render_recordings_table()
+
+    elif args.command == "review":
+        recorder.render_review_report(args.session_id)
+
+    elif args.command == "replay":
+        sid = args.session_id
+        if not sid:
+            recs = recorder.list_recordings()
+            if not recs:
+                print("\n[Error] No recorded sessions found to replay in recordings/.\n")
+                sys.exit(1)
+            sid = recs[0]["session_id"]
+        recorder.replay_cli(sid, speed=args.speed)
+
+    elif args.command == "record-shell":
+        cmd = args.shell_args if args.shell_args else None
+        if cmd and cmd[0] == "--":
+            cmd = cmd[1:]
+        rc = recorder.record_shell(cmd=cmd, session_id=args.session_id)
+        sys.exit(rc)
 
     elif args.command == "start":
         if args.preset:
@@ -348,6 +455,11 @@ def main():
             subprocess.run(["bash", str(preflight_script)])
         else:
             print("[Warning] tools/preflight.sh not found.")
+
+    elif args.command == "configure":
+        from core.configure import ConfigWizard
+        cw = ConfigWizard()
+        cw.run(non_interactive=args.yes, force=args.force)
 
     elif args.command == "web":
         import uvicorn
