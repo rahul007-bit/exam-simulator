@@ -97,11 +97,15 @@ class DesktopManager:
 
     def start_desktop(self, session_id: str, redis_host: str = "172.17.0.1") -> bool:
         """Spawns an ephemeral candidate desktop container with full XFCE & kubectl."""
+        is_admin = os.getenv("EXAM_ADMIN", "0").lower() in ("1", "true")
         if not self.is_docker_available() or not self.is_image_available():
-            # Fallback to host VNC
-            print(f"[DesktopManager] Container desktop unavailable, falling back to host VNC for session {session_id}")
-            redis_bus.set_desktop_info(session_id, host="127.0.0.1", vnc_port=5901, ws_port=6080)
-            return True
+            if is_admin:
+                print(f"[DesktopManager] Container desktop unavailable, falling back to host VNC for admin session {session_id}")
+                redis_bus.set_desktop_info(session_id, host="127.0.0.1", vnc_port=5901, ws_port=6080)
+                return True
+            else:
+                print(f"[DesktopManager] Error: Container desktop unavailable for candidate session {session_id} (host fallback disabled)")
+                return False
 
         container_name = f"cka-desktop-{session_id}"
         # Ensure any old container is cleaned
@@ -125,7 +129,8 @@ class DesktopManager:
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
             if res.returncode != 0:
                 print(f"[DesktopManager] docker run failed: {res.stderr.strip()}")
-                redis_bus.set_desktop_info(session_id, host="127.0.0.1", vnc_port=5901, ws_port=6080)
+                if is_admin:
+                    redis_bus.set_desktop_info(session_id, host="127.0.0.1", vnc_port=5901, ws_port=6080)
                 return False
 
             cid = res.stdout.strip()[:12]
@@ -140,9 +145,13 @@ class DesktopManager:
                     return True
                 time.sleep(0.5)
 
-            print(f"[DesktopManager] Timeout waiting for desktop agent registration. Falling back to host VNC.")
-            redis_bus.set_desktop_info(session_id, host="127.0.0.1", vnc_port=5901, ws_port=6080)
-            return True
+            if is_admin:
+                print(f"[DesktopManager] Timeout waiting for desktop agent registration. Falling back to host VNC for admin.")
+                redis_bus.set_desktop_info(session_id, host="127.0.0.1", vnc_port=5901, ws_port=6080)
+                return True
+            else:
+                print(f"[DesktopManager] Error: Timeout waiting for container desktop {container_name} registration.")
+                return False
 
         except Exception as e:
             print(f"[DesktopManager] Exception starting container: {e}")

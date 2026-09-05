@@ -932,25 +932,56 @@ async def _proxy_vnc(websocket: WebSocket, session_id: Optional[str] = None):
     subprotocol = "binary" if "binary" in requested_proto else None
     await websocket.accept(subprotocol=subprotocol)
 
-    target_host = "127.0.0.1"
-    target_port = 5901
+    is_admin_mode = os.getenv("EXAM_ADMIN", "0").lower() in ("1", "true")
+
+    # Resolve active session
+    active_sid = None
+    try:
+        client = redis_bus.get_sync_client()
+        if client:
+            real_sid = client.get("session:active:id")
+            if real_sid:
+                active_sid = real_sid.decode() if isinstance(real_sid, bytes) else real_sid
+    except Exception:
+        pass
 
     sid = session_id
     if not sid or sid == "active":
-        try:
-            client = redis_bus.get_sync_client()
-            if client:
-                real_sid = client.get("session:active:id")
-                if real_sid:
-                    sid = real_sid.decode() if isinstance(real_sid, bytes) else real_sid
-        except Exception:
-            pass
+        sid = active_sid
+
+    # Security check: candidates can ONLY access their own active session
+    if not is_admin_mode:
+        if not sid or (active_sid and sid != active_sid):
+            print(f"[VNC Proxy] Forbidden: Candidate attempted to access unauthorized session {session_id} (active: {active_sid})", flush=True)
+            await websocket.close(code=1008)
+            return
+
+    target_host = None
+    target_port = 5901
 
     if sid:
-        desktop_info = redis_bus.get_desktop_info(sid)
-        if desktop_info and "host" in desktop_info:
-            target_host = desktop_info["host"]
-            target_port = int(desktop_info.get("vnc_port", 5901))
+        # Check Redis registration, wait up to 4s if container is currently registering
+        for _ in range(8):
+            desktop_info = redis_bus.get_desktop_info(sid)
+            if desktop_info and "host" in desktop_info:
+                h = desktop_info["host"]
+                # Candidates must never connect to host loopback
+                if not is_admin_mode and (h == "127.0.0.1" or h == "localhost"):
+                    pass
+                else:
+                    target_host = h
+                    target_port = int(desktop_info.get("vnc_port", 5901))
+                    break
+            await asyncio.sleep(0.5)
+
+    if not target_host:
+        if is_admin_mode:
+            target_host = "127.0.0.1"
+            target_port = 5901
+        else:
+            print(f"[VNC Proxy] Connection rejected: Container desktop for session {sid} is unavailable (host fallback is disabled for candidates)", flush=True)
+            await websocket.close(code=1008)
+            return
 
     try:
         reader, writer = await asyncio.open_connection(target_host, target_port)
