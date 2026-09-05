@@ -12,6 +12,7 @@ let currentTab = 'desktop';
 let isAdminUser = false;
 let lastKnownHostClipboard = '';
 let lastKnownVncClipboard = '';
+let latestDesktopClipboard = '';
 let isSyncingClipboard = false;
 let pendingHostClipboardText = null;
 let clipboardToastTimer = null;
@@ -41,6 +42,7 @@ function initSessionWebSocket(sessionId) {
                 const data = JSON.parse(event.data);
                 if (data.type === 'clipboard_update') {
                     if (data.text) {
+                        latestDesktopClipboard = data.text;
                         handleIncomingVncClipboard(data.text, false);
                     }
                 } else if (data.type === 'timer_tick') {
@@ -386,6 +388,7 @@ window.handleIncomingVncClipboard = async function (text, explicitUserAction = f
     if (text === lastKnownVncClipboard && !explicitUserAction) return;
     if (text === lastKnownHostClipboard && !explicitUserAction) return;
     lastKnownVncClipboard = text;
+    latestDesktopClipboard = text;
 
     let wroteSuccessfully = false;
     if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -436,7 +439,42 @@ window.syncFromVncClipboard = async function (explicitUserAction = false) {
 };
 
 window.copyFromDesktopToHost = async function () {
-    await syncFromVncClipboard(true);
+    // 1. Check if we already have the latest text from real-time WebSocket
+    let text = (latestDesktopClipboard || '').trim();
+    if (!text) {
+        try {
+            const res = await fetch('/api/clipboard');
+            if (res.ok) {
+                const data = await res.json();
+                text = (data.text || '').trim();
+            }
+        } catch (_) {}
+    }
+
+    if (!text) {
+        showClipboardSyncToast('Desktop clipboard is empty', false);
+        return;
+    }
+
+    latestDesktopClipboard = text;
+    lastKnownVncClipboard = text;
+    pendingHostClipboardText = null;
+
+    let wroteSuccessfully = false;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        try {
+            await navigator.clipboard.writeText(text);
+            wroteSuccessfully = true;
+        } catch (_) {}
+    }
+
+    if (!wroteSuccessfully) {
+        fallbackCopyText(text);
+    }
+
+    const cleanText = text.replace(/[\r\n\t]+/g, ' ').trim();
+    const snippet = cleanText.length > 32 ? cleanText.substring(0, 29) + '...' : cleanText;
+    showClipboardSyncToast(`Copied from Desktop: "${snippet}"`, false);
 };
 
 /* ==========================================================================

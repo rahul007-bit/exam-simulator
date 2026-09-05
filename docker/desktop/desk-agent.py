@@ -58,7 +58,9 @@ class DeskAgent:
 
         self.r = redis.Redis(host=self.redis_host, port=self.redis_port, decode_responses=True)
         self.r_bytes = redis.Redis(host=self.redis_host, port=self.redis_port, decode_responses=False)
-        self._last_copied_text = ""
+        self._last_seen_clip = ""
+        self._last_seen_prim = ""
+        self._last_published = ""
         self._last_window_title = ""
 
         signal.signal(signal.SIGINT, self._handle_signal)
@@ -124,8 +126,10 @@ class DeskAgent:
                         except Exception:
                             text_to_set = raw_data
 
-                        if text_to_set and text_to_set != self._last_copied_text:
-                            self._last_copied_text = text_to_set
+                        if text_to_set and text_to_set != self._last_published:
+                            self._last_published = text_to_set
+                            self._last_seen_clip = text_to_set
+                            self._last_seen_prim = text_to_set
                             self._set_x11_clipboard(text_to_set)
                 except Exception:
                     time.sleep(1.0)
@@ -149,42 +153,79 @@ class DeskAgent:
 
     # --- Outbound Clipboard (X11 -> Redis) ---
 
-    def _get_x11_clipboard(self) -> Optional[str]:
-        """Reads current X11 selection."""
+    def _read_x11_selection(self, sel: str) -> str:
+        """Reads specific X11 selection buffer."""
         try:
             out = subprocess.check_output(
-                ["xclip", "-o", "-selection", "clipboard"],
+                ["xclip", "-o", "-selection", sel],
                 stderr=subprocess.DEVNULL,
-                timeout=1.0,
+                timeout=0.6,
             )
-            return out.decode("utf-8", errors="replace")
+            return out.decode("utf-8", errors="replace").strip()
         except Exception:
-            return None
+            return ""
 
     def start_outbound_clipboard_poller(self):
         def _poll():
+            # Initial seed from X11 selections to avoid spurious triggers on startup
+            self._last_seen_clip = self._read_x11_selection("clipboard")
+            self._last_seen_prim = self._read_x11_selection("primary")
+            self._last_published = self._last_seen_clip or self._last_seen_prim
+            if self._last_published:
+                try:
+                    self.r.set(f"clipboard:{self.session_id}", self._last_published, ex=3600)
+                    self.r.set("clipboard:active", self._last_published, ex=3600)
+                except Exception:
+                    pass
+
             while self.running:
                 try:
-                    current_clip = self._get_x11_clipboard()
-                    if current_clip and current_clip != self._last_copied_text:
-                        self._last_copied_text = current_clip
+                    clip_val = self._read_x11_selection("clipboard")
+                    prim_val = self._read_x11_selection("primary")
+
+                    new_selection = None
+                    # Prioritize explicit CLIPBOARD changes (Ctrl+C / Ctrl+Shift+C / Copy menu)
+                    if clip_val and clip_val != self._last_seen_clip:
+                        self._last_seen_clip = clip_val
+                        new_selection = clip_val
+                    # Otherwise check PRIMARY (mouse text highlights)
+                    elif prim_val and prim_val != self._last_seen_prim:
+                        self._last_seen_prim = prim_val
+                        new_selection = prim_val
+
+                    # Only process if changed from our last published clipboard
+                    if new_selection and new_selection != self._last_published:
+                        self._last_published = new_selection
+
+                        # 1. Update Redis keys so GET /api/clipboard immediately returns this text
+                        self.r.set(f"clipboard:{self.session_id}", new_selection, ex=3600)
+                        self.r.set("clipboard:active", new_selection, ex=3600)
+
+                        # 2. Publish clipboard_update to session channels for real-time WebSocket delivery
                         payload = {
-                            "type": "clipboard_sync",
+                            "type": "clipboard_update",
                             "source": "desktop",
-                            "text": current_clip,
+                            "text": new_selection,
                             "timestamp": time.time(),
                         }
-                        self.r.publish(f"clipboard:{self.session_id}", json.dumps(payload))
+                        payload_json = json.dumps(payload)
+                        self.r.publish(f"session:{self.session_id}", payload_json)
+                        if self.session_id != "active":
+                            self.r.publish("session:active", payload_json)
+                        self.r.publish(f"clipboard:{self.session_id}", payload_json)
+                        self.r.publish("clipboard:active", payload_json)
+
+                        # 3. Log event for exam recording
                         event_payload = {
                             "event": "CLIPBOARD_COPY",
                             "source": "desktop",
-                            "char_count": len(current_clip),
-                            "preview": current_clip[:40] + ("..." if len(current_clip) > 40 else ""),
+                            "char_count": len(new_selection),
+                            "preview": new_selection[:40] + ("..." if len(new_selection) > 40 else ""),
                         }
                         self.r.publish(f"events:{self.session_id}", json.dumps(event_payload))
                 except Exception:
                     pass
-                time.sleep(0.8)
+                time.sleep(0.6)
 
         t = threading.Thread(target=_poll, daemon=True, name="OutboundClipboard")
         t.start()
