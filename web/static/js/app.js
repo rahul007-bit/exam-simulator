@@ -52,6 +52,27 @@ function initSessionWebSocket(sessionId) {
                     }
                 } else if (data.type === 'transition_progress') {
                     updateTransitionProgress(data);
+                } else if (data.type === 'session_expired') {
+                    const reason = data.reason || 'unknown';
+                    const msg = data.message || 'Your exam session has ended.';
+                    console.warn('[Session] Expired:', reason, msg);
+                    // Show a prominent overlay and reload to the start screen
+                    const overlay = document.createElement('div');
+                    overlay.style.cssText = [
+                        'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.85)',
+                        'display:flex;flex-direction:column;align-items:center;justify-content:center',
+                        'color:#fff;font-family:monospace;gap:16px;text-align:center;padding:32px'
+                    ].join(';');
+                    const icon = reason === 'idle_timeout' ? '⏸' : '⏰';
+                    overlay.innerHTML = `
+                        <div style="font-size:3rem">${icon}</div>
+                        <div style="font-size:1.4rem;font-weight:bold">Session Ended</div>
+                        <div style="font-size:1rem;opacity:0.8;max-width:420px">${msg}</div>
+                        <button onclick="location.reload()" style="margin-top:12px;padding:10px 28px;border:none;border-radius:6px;background:#3b82f6;color:#fff;font-size:1rem;cursor:pointer">Return to Start</button>
+                    `;
+                    document.body.appendChild(overlay);
+                    currentSession = null;
+                    timeRemainingSeconds = 0;
                 }
             } catch (_) {}
         };

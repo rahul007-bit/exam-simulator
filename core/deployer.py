@@ -53,6 +53,9 @@ class LabDeployer:
                 scores=data.get("scores", {}),
                 flagged=data.get("flagged", []),
                 scorecard=data.get("scorecard"),
+                status=data.get("status", "active"),
+                last_active_at=data.get("last_active_at"),
+                candidate_token=data.get("candidate_token"),
             )
         except Exception as e:
             print(f"[Warning] Failed to parse active session: {e}")

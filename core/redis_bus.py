@@ -328,6 +328,89 @@ class RedisBus:
             client.delete(f"desktop:{session_id}")
         except Exception:
             pass
+    def touch_session_activity(self, session_id: str) -> None:
+        """Updates the last-activity timestamp for idle timeout tracking."""
+        if not self.is_available():
+            return
+        try:
+            client = self.get_sync_client()
+            client.set(f"session:{session_id}:last_active", str(time.time()), ex=86400)
+        except Exception:
+            pass
+
+    def get_session_last_active(self, session_id: str) -> Optional[float]:
+        """Returns Unix timestamp of last activity, or None."""
+        if not self.is_available():
+            return None
+        try:
+            client = self.get_sync_client()
+            val = client.get(f"session:{session_id}:last_active")
+            return float(val) if val else None
+        except Exception:
+            return None
+
+    def archive_session(self, session_id: str, status: str = "completed", scorecard: Optional[Dict] = None) -> None:
+        """Moves session into the history archive in Redis (preserves for history list)."""
+        if not self.is_available():
+            return
+        try:
+            client = self.get_sync_client()
+            existing = client.get(f"session:{session_id}")
+            meta: Dict[str, Any] = {}
+            if existing:
+                try:
+                    meta = json.loads(existing)
+                except Exception:
+                    pass
+            meta["status"] = status
+            meta["archived_at"] = time.time()
+            if scorecard:
+                meta["scorecard_summary"] = scorecard
+            # Write to history hash; keep for 30 days
+            client.set(f"history:{session_id}", json.dumps(meta), ex=86400 * 30)
+            client.zadd("session_history", {session_id: time.time()})
+            # Clean up active tracking keys
+            for suffix in ["", ":last_active", ":kubeconfig", ":exam_md"]:
+                client.delete(f"session:{session_id}{suffix}")
+            client.delete(f"desktop:{session_id}")
+            client.delete(f"clipboard:{session_id}")
+            client.delete(f"terminal:buffer:{session_id}")
+            # Remove from active id pointer if it matches
+            active_id = client.get("session:active:id")
+            if active_id == session_id:
+                client.delete("session:active:id")
+        except Exception as e:
+            print(f"[RedisBus] archive_session error: {e}")
+
+    def list_session_history(self, limit: int = 50) -> list:
+        """Returns list of recent sessions from history (newest first)."""
+        if not self.is_available():
+            return []
+        try:
+            client = self.get_sync_client()
+            # Get recent session IDs sorted by archive time (newest first)
+            ids = client.zrevrange("session_history", 0, limit - 1)
+            result = []
+            for sid in ids:
+                raw = client.get(f"history:{sid}")
+                if raw:
+                    try:
+                        data = json.loads(raw)
+                        result.append({
+                            "session_id": sid,
+                            "name": data.get("name", "Unknown"),
+                            "status": data.get("status", "unknown"),
+                            "created_at": data.get("created_at", ""),
+                            "archived_at": data.get("archived_at"),
+                            "total_tasks": data.get("total_tasks", 0) or len(data.get("question_ids", [])),
+                            "time_limit_minutes": data.get("time_limit_minutes"),
+                            "scorecard_summary": data.get("scorecard_summary"),
+                        })
+                    except Exception:
+                        pass
+            return result
+        except Exception:
+            return []
 
 
 # Global singleton instance

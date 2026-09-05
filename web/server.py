@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import secrets
 import subprocess
 import pty
 import select
@@ -113,6 +114,14 @@ class ClipboardRequest(BaseModel):
     text: str
 
 
+# Idle timeout: auto-kill container + session after this many minutes of inactivity
+IDLE_TIMEOUT_MINUTES: int = int(os.getenv("EXAM_IDLE_TIMEOUT_MINUTES", "30"))
+
+# In-memory candidate token -> session_id mapping (supplements Redis for fast lookup)
+# token -> session_id
+_candidate_token_map: Dict[str, str] = {}
+
+
 class ClientEventRequest(BaseModel):
     event_type: str
     data: Optional[Dict[str, Any]] = None
@@ -158,12 +167,11 @@ def _get_locked_preset_info(override_preset: Optional[str] = None) -> Dict[str, 
 
 @app.get("/api/session")
 def get_session(request: Request):
-    session = deployer.load_active_session(loader)
-    
-    # Check query params for admin/candidate mode
+    # Check query params for admin/candidate mode + candidate token routing
     url_admin = request.query_params.get("admin")
     url_candidate = request.query_params.get("candidate")
     url_preset = request.query_params.get("preset")
+    url_token = request.query_params.get("token")  # Per-candidate session token
 
     if url_admin in ("1", "true", "yes"):
         is_admin = True
@@ -171,6 +179,41 @@ def get_session(request: Request):
         is_admin = False
     else:
         is_admin = os.getenv("EXAM_ADMIN", "0") == "1"
+
+    # Candidate token routing: resolve session_id from token
+    session = None
+    if url_token:
+        sid_for_token = _candidate_token_map.get(url_token)
+        if not sid_for_token and redis_bus.is_available():
+            try:
+                sid_for_token = redis_bus.get_sync_client().get(f"token:{url_token}")
+            except Exception:
+                pass
+        if sid_for_token:
+            state = redis_bus.get_session_state(sid_for_token)
+            if state:
+                q_ids = state.get("question_ids", [])
+                questions = [loader.get(qid) for qid in q_ids if loader.get(qid) is not None]
+                from core.models import ExamSession
+                session = ExamSession(
+                    session_id=state.get("session_id", "default"),
+                    created_at=state.get("created_at", ""),
+                    name=state.get("name", "Active Practice Session"),
+                    questions=questions,
+                    target_contexts=state.get("target_contexts", []),
+                    time_limit_minutes=state.get("time_limit_minutes"),
+                    mode=state.get("mode", "batch"),
+                    current_index=state.get("current_index", 0),
+                    scores=state.get("scores", {}),
+                    flagged=state.get("flagged", []),
+                    scorecard=state.get("scorecard"),
+                    status=state.get("status", "active"),
+                    last_active_at=state.get("last_active_at"),
+                    candidate_token=state.get("candidate_token"),
+                )
+
+    if session is None:
+        session = deployer.load_active_session(loader)
 
     preset_info = _get_locked_preset_info(url_preset)
 
@@ -181,6 +224,15 @@ def get_session(request: Request):
             "locked_preset": preset_info,
             "is_admin": is_admin,
         }
+
+    # Touch activity timestamp for idle timeout tracking
+    now_utc = datetime.now(timezone.utc)
+    try:
+        session.last_active_at = now_utc.isoformat()
+        deployer.save_session(session)
+        redis_bus.touch_session_activity(session.session_id)
+    except Exception:
+        pass
 
     cur_idx = session.current_index
     current_q = session.current_question
@@ -211,8 +263,10 @@ def get_session(request: Request):
     return {
         "active": True,
         "session_id": session.session_id,
+        "candidate_token": session.candidate_token,
         "name": session.name,
         "mode": session.mode,
+        "status": session.status,
         "current_index": cur_idx,
         "total_tasks": len(session.questions),
         "time_limit_minutes": session.time_limit_minutes,
@@ -220,7 +274,7 @@ def get_session(request: Request):
         "created_at": session.created_at,
         "start_timestamp": start_ts,
         "end_timestamp": end_ts,
-        "server_timestamp": datetime.now(timezone.utc).timestamp(),
+        "server_timestamp": now_utc.timestamp(),
         "flagged_ids": session.flagged,
         "current_task": task_data,
         "terminal_port": terminal_port,
@@ -609,6 +663,16 @@ def action_submit():
     try:
         if session and session.session_id:
             desktop_mgr.stop_desktop(session.session_id)
+            redis_bus.archive_session(
+                session.session_id,
+                status="completed",
+                scorecard={
+                    "total_earned": total_earned,
+                    "total_possible": total_possible,
+                    "percentage": round(pct, 1),
+                    "passed": passed,
+                },
+            )
     except Exception:
         pass
 
@@ -693,6 +757,15 @@ def log_client_event_endpoint(session_id: str, req: ClientEventRequest):
 
 @app.post("/api/start")
 def start_exam(req: StartRequest, request: Request):
+    # Archive any currently active session before starting a new one
+    old_session = deployer.load_active_session(loader)
+    if old_session and old_session.session_id:
+        try:
+            desktop_mgr.stop_desktop(old_session.session_id)
+            redis_bus.archive_session(old_session.session_id, status="replaced")
+        except Exception:
+            pass
+
     if req.all_questions:
         questions = loader.get_all()
         session = deployer.deploy_sequential(
@@ -723,6 +796,24 @@ def start_exam(req: StartRequest, request: Request):
         )
 
     if session and session.session_id:
+        # Generate a unique per-candidate token for URL-based session isolation
+        token = secrets.token_urlsafe(16)
+        session.candidate_token = token
+        session.status = "active"
+        session.last_active_at = datetime.now(timezone.utc).isoformat()
+        deployer.save_session(session)
+
+        # Register token -> session_id mapping in memory and Redis
+        _candidate_token_map[token] = session.session_id
+        if redis_bus.is_available():
+            try:
+                redis_bus.get_sync_client().set(
+                    f"token:{token}", session.session_id, ex=86400
+                )
+            except Exception:
+                pass
+
+        redis_bus.touch_session_activity(session.session_id)
         desktop_mgr.start_desktop(session.session_id)
 
     return get_session(request)
@@ -733,8 +824,34 @@ def reset_exam():
     active_session = deployer.load_active_session(loader)
     if active_session and active_session.session_id:
         desktop_mgr.stop_desktop(active_session.session_id)
+        try:
+            redis_bus.archive_session(active_session.session_id, status="reset")
+        except Exception:
+            pass
     deployer.clear_session(cleanup_cluster=True)
     return {"status": "ok", "message": "Exam session cleared and cluster cleaned"}
+
+
+@app.get("/api/sessions")
+def list_sessions():
+    """Returns session history (all past + current sessions) from Redis archive."""
+    history = redis_bus.list_session_history(limit=50)
+    # Also include any currently active session
+    current = deployer.load_active_session(loader)
+    if current:
+        history.insert(0, {
+            "session_id": current.session_id,
+            "name": current.name,
+            "status": current.status or "active",
+            "created_at": current.created_at,
+            "archived_at": None,
+            "total_tasks": len(current.questions),
+            "time_limit_minutes": current.time_limit_minutes,
+            "time_remaining_seconds": _calculate_time_remaining(current),
+            "scorecard_summary": None,
+            "candidate_token": current.candidate_token,
+        })
+    return {"sessions": history, "total": len(history)}
 
 
 # --- Built-in WebSocket PTY Terminal ---
@@ -1148,6 +1265,16 @@ async def session_events_websocket(websocket: WebSocket, session_id: str):
                             pass
                     elif msg_type == "ping":
                         await websocket.send_text(json.dumps({"type": "pong", "time": time.time()}))
+
+                    # Touch activity for any message to reset idle timeout
+                    try:
+                        target = session_id
+                        if target == "active":
+                            s = deployer.load_active_session(loader)
+                            target = s.session_id if s else "default"
+                        redis_bus.touch_session_activity(target)
+                    except Exception:
+                        pass
                 except Exception:
                     pass
         except Exception:
@@ -1167,7 +1294,7 @@ async def session_events_websocket(websocket: WebSocket, session_id: str):
             pass
 
 
-# --- Background Workers: Host Clipboard & Timer Broadcast ---
+# --- Background Workers: Host Clipboard, Timer Broadcast, Idle Reaper, Timer Expiry ---
 
 _last_x11_clipboard = ""
 
@@ -1175,6 +1302,8 @@ _last_x11_clipboard = ""
 async def start_background_workers():
     asyncio.create_task(_clipboard_x11_monitor())
     asyncio.create_task(_session_timer_broadcaster())
+    asyncio.create_task(_idle_session_reaper())
+    asyncio.create_task(_session_expiry_enforcer())
 
 async def _clipboard_x11_monitor():
     global _last_x11_clipboard
@@ -1227,7 +1356,82 @@ async def _session_timer_broadcaster():
         except Exception:
             pass
         await asyncio.sleep(2.0)
+async def _idle_session_reaper():
+    """Auto-terminates a candidate session if idle for IDLE_TIMEOUT_MINUTES with no activity."""
+    while True:
+        await asyncio.sleep(60)  # Check every minute
+        try:
+            session = deployer.load_active_session(loader)
+            if not session or not session.session_id:
+                continue
 
+            last_active = redis_bus.get_session_last_active(session.session_id)
+            if last_active is None:
+                # No activity record yet; seed it now
+                redis_bus.touch_session_activity(session.session_id)
+                continue
+
+            idle_seconds = time.time() - last_active
+            idle_limit_seconds = IDLE_TIMEOUT_MINUTES * 60
+            if idle_seconds >= idle_limit_seconds:
+                print(
+                    f"[SessionReaper] Session {session.session_id} idle for "
+                    f"{int(idle_seconds)}s (limit {idle_limit_seconds}s). Terminating."
+                )
+                try:
+                    await redis_bus.async_publish_session_event(session.session_id, {
+                        "type": "session_expired",
+                        "reason": "idle_timeout",
+                        "idle_seconds": int(idle_seconds),
+                        "message": f"Session expired due to {IDLE_TIMEOUT_MINUTES} minutes of inactivity.",
+                    })
+                except Exception:
+                    pass
+                await asyncio.sleep(2)  # Give WS clients time to receive the event
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(None, lambda: (
+                    desktop_mgr.stop_desktop(session.session_id),
+                    redis_bus.archive_session(session.session_id, status="idle_timeout"),
+                    deployer.clear_session(cleanup_cluster=False),
+                ))
+        except Exception as e:
+            print(f"[SessionReaper] Error: {e}")
+
+
+async def _session_expiry_enforcer():
+    """Server-side enforcement: terminates session when time_remaining hits zero."""
+    while True:
+        await asyncio.sleep(30)  # Check every 30 seconds
+        try:
+            session = deployer.load_active_session(loader)
+            if not session or not session.session_id:
+                continue
+            if not session.time_limit_minutes:
+                continue  # Untimed session
+
+            rem = _calculate_time_remaining(session)
+            if rem is not None and rem <= 0:
+                print(
+                    f"[ExpiryEnforcer] Session {session.session_id} time limit reached. Auto-submitting."
+                )
+                try:
+                    await redis_bus.async_publish_session_event(session.session_id, {
+                        "type": "session_expired",
+                        "reason": "time_limit",
+                        "message": "Exam time limit reached. Session auto-submitted.",
+                    })
+                except Exception:
+                    pass
+                await asyncio.sleep(2)
+                # Archive as expired (not graded since we don't have full grading context async)
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(None, lambda: (
+                    desktop_mgr.stop_desktop(session.session_id),
+                    redis_bus.archive_session(session.session_id, status="expired"),
+                    deployer.clear_session(cleanup_cluster=False),
+                ))
+        except Exception as e:
+            print(f"[ExpiryEnforcer] Error: {e}")
 
 
 # Mount noVNC static files if present

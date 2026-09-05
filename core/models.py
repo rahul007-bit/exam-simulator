@@ -96,6 +96,9 @@ class ExamSession:
     scores: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     flagged: List[str] = field(default_factory=list)
     scorecard: Optional[List[Dict[str, Any]]] = None
+    status: str = "active"          # "active" | "completed" | "expired" | "idle_timeout"
+    last_active_at: Optional[str] = None  # ISO8601 UTC of last candidate activity
+    candidate_token: Optional[str] = None  # Unique per-candidate URL token
 
     @property
     def current_question(self) -> Optional[Question]:
@@ -116,4 +119,7 @@ class ExamSession:
             "scores": self.scores,
             "flagged": self.flagged,
             "scorecard": self.scorecard,
+            "status": self.status,
+            "last_active_at": self.last_active_at,
+            "candidate_token": self.candidate_token,
         }
