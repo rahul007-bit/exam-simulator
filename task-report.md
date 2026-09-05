@@ -381,3 +381,8 @@ Order: CA-002 → CA-003 → CA-007 → SC-001 → SC-009 → SC-010 → WL-002 
   However, `setup.sh` and `grader.py` deploy and grade `web-svc`, and the initial misconfigured targetPort is `8080`, not `9090`.
 - **Recommendation:** Update `question.yaml` to refer to Service `web-svc` and port `8080`.
 
+#### Issue #18 — [TERMINAL RECONNECT UX] Raw Byte Replay vs. Persistent Session (tmux)
+- **Location:** `web/server.py` (`terminal_websocket`)
+- **Evidence:** When a candidate refreshes their browser or experiences network reconnection, `/ws/terminal` dumps historical buffered chunks from Redis into xterm.js, but immediately spawns a *brand-new* `bash` login shell. This duplicates the welcome banner and prompt, and kills background processes (e.g. `nano` or `kubectl watch`).
+- **Recommendation:** Integrate persistent session management via `tmux new-session -A -s exam-{session_id}` so reconnecting transparently attaches to the live running shell with running editors, history, and scrollback intact without spawning duplicate shells.
+
