@@ -2,11 +2,11 @@
 Ephemeral Containerized Desktop Manager
 Spawns, monitors, and terminates isolated candidate desktops via Docker and Redis.
 """
-
 import os
 import time
 import shutil
 import subprocess
+from pathlib import Path
 from typing import Optional, Dict, Any
 from core.redis_bus import bus as redis_bus
 
@@ -47,8 +47,43 @@ class DesktopManager:
         except Exception:
             return False
 
+    def _inject_kubeconfig(self, session_id: str, redis_host: str = "172.17.0.1") -> None:
+        """Extracts host kubeconfig, patches localhost endpoints to container-accessible gateway, and caches in Redis."""
+        kube_candidates = [
+            Path("/home/exam/.kube/config"),
+            Path(os.path.expanduser("~/.kube/config")),
+            Path("/root/.kube/config"),
+            Path("/etc/kubernetes/admin.conf"),
+        ]
+        kube_text = None
+        for p in kube_candidates:
+            if p.exists() and p.is_file():
+                try:
+                    content = p.read_text()
+                    if content.strip():
+                        kube_text = content
+                        break
+                except Exception:
+                    pass
+
+        if not kube_text:
+            return
+
+        # Rewrite 0.0.0.0 and 127.0.0.1 cluster URLs to host gateway IP
+        kube_text = kube_text.replace("https://0.0.0.0:", f"https://{redis_host}:")
+        kube_text = kube_text.replace("https://127.0.0.1:", f"https://{redis_host}:")
+
+        try:
+            client = redis_bus.get_sync_client()
+            if client:
+                client.setex(f"session:{session_id}:kubeconfig", 86400, kube_text)
+                client.setex("k8s:kubeconfig", 86400, kube_text)
+                print(f"[DesktopManager] Injected cluster kubeconfig into Redis for session {session_id}")
+        except Exception as ex:
+            print(f"[DesktopManager] Warning: failed to store kubeconfig in Redis: {ex}")
+
     def start_desktop(self, session_id: str, redis_host: str = "172.17.0.1") -> bool:
-        """Spawns an ephemeral candidate desktop container."""
+        """Spawns an ephemeral candidate desktop container with full XFCE & kubectl."""
         if not self.is_docker_available() or not self.is_image_available():
             # Fallback to host VNC
             print(f"[DesktopManager] Container desktop unavailable, falling back to host VNC for session {session_id}")
@@ -59,9 +94,13 @@ class DesktopManager:
         # Ensure any old container is cleaned
         self.stop_desktop(session_id)
 
+        # Inject kubeconfig into Redis for container startup
+        self._inject_kubeconfig(session_id, redis_host)
+
         cmd = [
             "docker", "run", "-d",
             "--name", container_name,
+            "--security-opt", "seccomp=unconfined",
             "-e", f"SESSION_ID={session_id}",
             "-e", f"REDIS_HOST={redis_host}",
             "-e", "REDIS_PORT=6379",
@@ -79,8 +118,8 @@ class DesktopManager:
             cid = res.stdout.strip()[:12]
             print(f"[DesktopManager] Started container {container_name} ({cid}) for session {session_id}")
 
-            # Wait up to 10s for desk-agent inside container to register in Redis
-            deadline = time.time() + 10.0
+            # Wait up to 15s for desk-agent inside container to register in Redis
+            deadline = time.time() + 15.0
             while time.time() < deadline:
                 info = redis_bus.get_desktop_info(session_id)
                 if info and "host" in info:
@@ -111,6 +150,12 @@ class DesktopManager:
             except Exception:
                 pass
         redis_bus.clear_desktop_info(session_id)
+        try:
+            client = redis_bus.get_sync_client()
+            if client:
+                client.delete(f"session:{session_id}:kubeconfig")
+        except Exception:
+            pass
 
 
 desktop_mgr = DesktopManager()

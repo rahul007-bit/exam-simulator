@@ -141,6 +141,13 @@ class LabDeployer:
     def clear_session(self, cleanup_cluster: bool = True) -> None:
         try:
             from core.redis_bus import bus as redis_bus
+            client = redis_bus.get_sync_client()
+            if client:
+                old_sid = client.get("session:active:id")
+                if old_sid:
+                    sid_str = old_sid.decode() if isinstance(old_sid, bytes) else old_sid
+                    from core.desktop_manager import desktop_mgr
+                    desktop_mgr.stop_desktop(sid_str)
             redis_bus.clear_session_state()
         except Exception:
             pass

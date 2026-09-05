@@ -901,17 +901,28 @@ async def _proxy_vnc(websocket: WebSocket, session_id: Optional[str] = None):
     target_host = "127.0.0.1"
     target_port = 5901
 
-    if session_id:
-        desktop_info = redis_bus.get_desktop_info(session_id)
+    sid = session_id
+    if not sid or sid == "active":
+        try:
+            client = redis_bus.get_sync_client()
+            if client:
+                real_sid = client.get("session:active:id")
+                if real_sid:
+                    sid = real_sid.decode() if isinstance(real_sid, bytes) else real_sid
+        except Exception:
+            pass
+
+    if sid:
+        desktop_info = redis_bus.get_desktop_info(sid)
         if desktop_info and "host" in desktop_info:
             target_host = desktop_info["host"]
             target_port = int(desktop_info.get("vnc_port", 5901))
 
     try:
         reader, writer = await asyncio.open_connection(target_host, target_port)
-        print(f"[VNC Proxy] Connected to VNC at {target_host}:{target_port} (session: {session_id or 'default'})")
+        print(f"[VNC Proxy] Connected to VNC at {target_host}:{target_port} (session: {session_id or 'default'}, resolved_sid: {sid})", flush=True)
     except Exception as e:
-        print(f"[VNC Proxy] Failed to connect to VNC target {target_host}:{target_port}: {e}")
+        print(f"[VNC Proxy] Failed to connect to VNC target {target_host}:{target_port}: {e}", flush=True)
         await websocket.close()
         return
 
@@ -968,8 +979,15 @@ async def _proxy_vnc(websocket: WebSocket, session_id: Optional[str] = None):
 
 
 @app.websocket("/ws/desktop/{session_id}")
+@app.websocket("/novnc/ws/desktop/{session_id}")
 async def vnc_ws_dynamic_desktop(websocket: WebSocket, session_id: str):
     await _proxy_vnc(websocket, session_id=session_id)
+
+
+@app.websocket("/ws/desktop")
+@app.websocket("/novnc/ws/desktop")
+async def vnc_ws_dynamic_desktop_default(websocket: WebSocket):
+    await _proxy_vnc(websocket, session_id=None)
 
 
 @app.websocket("/ws/vnc")
