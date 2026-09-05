@@ -1,0 +1,17 @@
+id: TR-035
+title: Align Kubelet Cgroup Driver with Container Runtime
+domain: troubleshooting
+difficulty: hard
+points: 4
+target_context: kubeadm-vms
+namespace: node-runtime
+cluster_scoped: true
+tags:
+- cgroup
+- kubelet
+- containerd
+description: |
+  Worker node `node2` is currently in a `NotReady` state and workloads cannot be scheduled on it.
+
+  Connect to `node2` via SSH (`ssh node2`), investigate why the node and its kubelet service are failing, resolve the issue, and ensure the node successfully returns to `Ready` status in the cluster.
+grader_hint: Kubelet cgroup driver on node2 is systemd and node is Ready

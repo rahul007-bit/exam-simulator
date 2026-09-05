@@ -1,0 +1,14 @@
+id: TR-031
+title: Fix InitContainer Log Directory Creation Race
+domain: troubleshooting
+difficulty: hard
+points: 4
+target_context: k3d-cka
+namespace: log-collector
+cluster_scoped: false
+tags:
+- volumes
+- initcontainer
+description: Container `logger` crashes because directory `/var/log/app` in shared
+  volume is not yet initialized by `app`. Add initContainer to ensure path exists.
+grader_hint: Pod in log-collector is 2/2 Ready

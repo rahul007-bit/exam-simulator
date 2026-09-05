@@ -1,0 +1,15 @@
+id: TR-039
+title: Clear Corrupted Etcd WAL Lock on Dedicated Control Node
+domain: troubleshooting
+difficulty: hard
+points: 4
+target_context: kubeadm-vms
+namespace: controlplane-storage
+cluster_scoped: true
+tags:
+- etcd
+- wal
+- recovery
+description: Etcd static pod fails to start due to lock contention on data dir `/var/lib/etcd`.
+  Clean lock and restore etcd member.
+grader_hint: etcd pod is running healthy

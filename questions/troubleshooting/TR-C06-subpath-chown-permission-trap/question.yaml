@@ -1,0 +1,19 @@
+id: TR-C06
+title: 'Chaos: Fix Non-Root Pod SubPath Directory Ownership Conflict'
+domain: troubleshooting
+difficulty: crazy
+points: 6
+target_context: k3d-cka
+namespace: database-tier
+cluster_scoped: false
+tags:
+- crazy
+- subpath
+- chown
+description: |
+  Pod `db-server` in namespace `database-tier` is crashlooping with permission denied errors when attempting to write to `/data/db`.
+
+  The container runs as a non-root user (`runAsUser: 999`), but its mounted `subPath` directory on the volume was initialized with root ownership.
+
+  Investigate pod `db-server`. Add an `initContainer` to correct the directory ownership/permissions on `/data/db` prior to the main container starting, and ensure that `db-server` transitions to `1/1 Running`.
+grader_hint: Pod db-server in database-tier is 1/1 Running with initContainer correcting subPath ownership

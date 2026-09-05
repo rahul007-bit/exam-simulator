@@ -1,0 +1,92 @@
+# ~/.bashrc: executed by bash(1) for non-login shells.
+
+# If not running interactively, don't do anything
+case $- in
+    *i*) ;;
+      *) return;;
+esac
+
+# Don't put duplicate lines or lines starting with space in the history.
+HISTCONTROL=ignoreboth
+
+# Append to the history file, don't overwrite it
+shopt -s histappend
+
+# Set history length
+HISTSIZE=1000
+HISTFILESIZE=2000
+
+# Check window size after each command
+shopt -s checkwinsize
+
+# Set color prompt
+if [ -x /usr/bin/tput ] && tput setaf 1 >&/dev/null; then
+    color_prompt=yes
+else
+    color_prompt=
+fi
+
+if [ "$color_prompt" = yes ]; then
+    PS1='\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
+else
+    PS1='\u@\h:\w\$ '
+fi
+unset color_prompt
+
+# Enable bash completion
+if ! shopt -oq posix; then
+  if [ -f /usr/share/bash-completion/bash_completion ]; then
+    . /usr/share/bash-completion/bash_completion
+  elif [ -f /etc/bash_completion ]; then
+    . /etc/bash_completion
+  fi
+fi
+
+# ==========================================================
+# Kubernetes Exam Environment - Candidate Guide & Helpers
+# ==========================================================
+
+# Kubectl aliases & bash completion
+source <(kubectl completion bash 2>/dev/null) 2>/dev/null || true
+alias k=kubectl
+complete -o default -F __start_kubectl k 2>/dev/null || true
+export dr="--dry-run=client -o yaml"
+export now="--force --grace-period=0"
+export EDITOR="nano"
+export KUBE_EDITOR="nano"
+
+# Welcome banner (shown on interactive shell startup)
+if [[ $- == *i* ]]; then
+cat << 'EOF_BANNER'
+
+========================================================================
+              KUBERNETES EXAM ENVIRONMENT & LAB RUNNER                  
+========================================================================
+
+Exam CLI Navigation:
+  examctl task         - View the current active task instructions
+  examctl status       - View table of all exam tasks & completion status
+  examctl next         - Deploy and advance to the next task
+  examctl prev         - Deploy and return to the previous task
+  examctl jump <N>     - Jump to a specific task number (e.g. examctl jump 3)
+  examctl flag [N]     - Flag current task (or task N) for review
+  examctl unflag [N]   - Unflag current task (or task N)
+
+Cluster Contexts & Node SSH:
+  k3d-cka              - Local k3d cluster
+  kubeadm-vms          - Remote kubeadm cluster (ssh node1, ssh node2, ssh node3)
+
+Recommended Editor:
+  nano                 - Default editor (Ctrl+O to save, Ctrl+X to exit)
+
+Useful Aliases & Shortcuts:
+  k                   -> kubectl
+  $dr                 -> --dry-run=client -o yaml
+  $now                -> --force --grace-period=0
+  k config use-context <name> -> Switch active cluster context
+  ssh node1 / ssh node2 / ssh node3 -> Connect to cluster nodes
+
+========================================================================
+
+EOF_BANNER
+fi

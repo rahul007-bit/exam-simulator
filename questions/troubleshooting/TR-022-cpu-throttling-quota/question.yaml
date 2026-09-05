@@ -1,0 +1,15 @@
+id: TR-022
+title: Adjust Namespace CPU Quota to Prevent Throttling
+domain: troubleshooting
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: analytics
+cluster_scoped: false
+tags:
+- quota
+- cpu
+- limits
+description: Deployment `data-sync` in `analytics` cannot create required replicas
+  due to namespace CPU ResourceQuota. Increase quota or optimize pod requests.
+grader_hint: Deployment data-sync has 2/2 ready pods

@@ -1,0 +1,14 @@
+id: TR-029
+title: Fix PodDisruptionBudget minAvailable 100% Blocking Drain
+domain: troubleshooting
+difficulty: hard
+points: 4
+target_context: k3d-cka
+namespace: payment-processor
+cluster_scoped: false
+tags:
+- pdb
+- drain
+description: 'PDB `strict-pdb` in `payment-processor` blocks node eviction because `minAvailable:
+  100%` is set on a 1-replica deployment.'
+grader_hint: PDB updated to allow drain

@@ -1,0 +1,21 @@
+name: "Mock Exam 01 — ACME Corp Onboarding"
+description: "Realistic full-length mock exam with 17 mixed tasks focusing on core workloads, storage, and onboarding incidents."
+time_limit_minutes: 120
+questions:
+  - TR-001  # [M] CrashLoopBackOff on Checkout
+  - TR-002  # [E] Missing ConfigMap Key
+  - TR-003  # [E] Empty Endpoints Cart Service
+  - TR-004  # [E] ImagePullBackOff tag typo
+  - TR-006  # [M] Ingress routing bug
+  - TR-007  # [M] PVC StorageClass mismatch
+  - TR-008  # [M] Node tainted unschedulable
+  - TR-009  # [M] NodeSelector unsatisfiable
+  - TR-010  # [E] Stuck Finalizer
+  - TR-012  # [M] RBAC 403 secrets
+  - WL-001  # [M] Sidecar Logging Pod
+  - WL-002  # [E] InitContainer DB Gate
+  - WL-003  # [M] Deployment RollingUpdate
+  - ST-001  # [E] Local PV/PVC Binding
+  - ST-002  # [M] Dynamic StorageClass Retain
+  - CA-007  # [E] Ingress Path Routing
+  - SC-001  # [E] RBAC ServiceAccount & Role

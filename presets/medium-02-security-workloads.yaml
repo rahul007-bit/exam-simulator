@@ -1,0 +1,18 @@
+name: "Medium Exam 02 — Full Curriculum"
+description: "14-question CKA practice exam matching the official CNCF domain blueprint (Troubleshooting, Cluster Arch, Services/Security, Workloads, Storage)."
+time_limit_minutes: 120
+questions:
+  - CA-008  # [CA] Ingress host TLS termination
+  - CA-010  # [CA] CoreDNS custom hosts rewrite
+  - CA-011  # [CA] kubeadm certs renewal
+  - SC-003  # [Sec] SecurityContext non-root readonly
+  - SC-008  # [Sec] Audit & revoke cluster-admin
+  - SC-012  # [Sec] Hardened pod security
+  - WL-005  # [WL] Node affinity preferred & required
+  - WL-006  # [WL] DaemonSet worker nodes
+  - ST-004  # [ST] Pod multi subpaths
+  - ST-006  # [ST] StatefulSet VolumeClaimTemplates
+  - TR-005  # [TR] CoreDNS corefile syntax error
+  - TR-009  # [TR] NodeSelector unsatisfiable
+  - TR-013  # [TR] Rollback broken deployment
+  - TR-015  # [TR] Headless service missing ClusterIP

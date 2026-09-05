@@ -1,0 +1,19 @@
+id: CA-016
+title: Configure TLS Ingress Routing for Internal API Gateway
+domain: cluster-arch
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: gateway-mesh
+cluster_scoped: false
+breaking: false
+preserve_state: true
+tags:
+- networking
+- ingress
+- tls
+description: "In namespace gateway-mesh:\n1. Generate a self-signed TLS certificate\
+  \ and create a Secret named gateway-tls-secret (type: kubernetes.io/tls).\n2. Create\
+  \ an Ingress named mesh-gateway with host api.internal.company:\n   - Path /auth\
+  \ (Prefix) -> auth-svc:80\n   - Path /orders (Prefix) -> order-svc:80\n   - TLS\
+  \ secret gateway-tls-secret for host api.internal.company."

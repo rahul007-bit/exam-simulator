@@ -1,0 +1,23 @@
+id: SC-012
+title: Enforce SecurityContext Restrictions on Pipeline Workload
+domain: security
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: secure-pipeline
+cluster_scoped: false
+tags:
+- security
+- securitycontext
+- pod
+description: |
+  In namespace `secure-pipeline`, an existing ServiceAccount named `pipeline-runner` is configured.
+
+  Create a Pod named `hardened-worker` using image `busybox:1.36` running command `sleep 3600` that:
+  - Runs under ServiceAccount `pipeline-runner`
+  - Sets `runAsNonRoot: true`
+  - Sets `runAsUser: 10001`
+  - Sets `allowPrivilegeEscalation: false`
+  - Sets `readOnlyRootFilesystem: true`
+  - Drops `ALL` capabilities
+grader_hint: Pod hardened-worker runs under pipeline-runner with strict non-root securityContext

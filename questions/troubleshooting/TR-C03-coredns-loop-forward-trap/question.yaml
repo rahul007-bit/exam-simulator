@@ -1,0 +1,15 @@
+id: TR-C03
+title: 'Chaos: Resolve CoreDNS Loop Forward Plugin Deadlock'
+domain: troubleshooting
+difficulty: crazy
+points: 6
+target_context: k3d-cka
+namespace: kube-system
+cluster_scoped: true
+tags:
+- crazy
+- coredns
+- loop
+description: CoreDNS is in a 100% CPU crashloop because `/etc/resolv.conf` forwards
+  queries back to CoreDNS IP. Break the circular loop.
+grader_hint: CoreDNS pods are stable without loop crashes

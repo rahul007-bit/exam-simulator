@@ -1,0 +1,14 @@
+id: WL-007
+title: Create CronJob with History Limits
+domain: workloads
+difficulty: easy
+points: 2
+target_context: k3d-cka
+namespace: batch-schedules
+cluster_scoped: false
+tags:
+- cronjob
+- schedule
+description: 'Create CronJob `log-cleaner` in `batch-schedules` running `*/15 * * * *` with
+  `successfulJobsHistoryLimit: 3`.'
+grader_hint: CronJob log-cleaner exists with historyLimit 3

@@ -1,0 +1,20 @@
+id: TR-005
+title: Repair CoreDNS Corefile Syntax Error
+domain: troubleshooting
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: kube-system
+cluster_scoped: true
+breaking: true
+tags:
+- coredns
+- dns
+- kube-system
+- troubleshooting
+description: 'CoreDNS pods in `kube-system` are crashlooping due to an invalid configuration
+  directive in the `coredns` ConfigMap.
+
+  Inspect CoreDNS logs, fix the invalid block in the `coredns` ConfigMap in namespace
+  `kube-system`, and restart the CoreDNS deployment to restore cluster DNS.'
+grader_hint: CoreDNS pods in kube-system are running and passing readiness probes.

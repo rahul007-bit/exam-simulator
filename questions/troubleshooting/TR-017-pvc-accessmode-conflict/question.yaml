@@ -1,0 +1,16 @@
+id: TR-017
+title: Resolve PVC ReadWriteMany on ReadWriteOnce Storage
+domain: troubleshooting
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: media-platform
+cluster_scoped: false
+tags:
+- pvc
+- accessmodes
+description: |
+  PersistentVolumeClaim `shared-data` in namespace `media-platform` is stuck in `Pending` status and cannot bind to storage.
+
+  Investigate the storage configuration and the available PersistentVolume `shared-data-pv`. Resolve the configuration conflict on the PVC so that `shared-data` successfully transitions to `Bound` status.
+grader_hint: PVC shared-data is Bound with ReadWriteOnce in namespace media-platform

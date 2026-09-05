@@ -1,0 +1,15 @@
+id: CA-014
+title: Add Missing IP SAN to API Server Certificate
+domain: cluster-arch
+difficulty: hard
+points: 4
+target_context: kubeadm-vms
+namespace: default
+cluster_scoped: true
+tags:
+- apiserver
+- certs
+- san
+description: API server is unreachable via external load balancer IP `10.0.0.50`.
+  Update kubeadm config to include IP in SANs and regenerate apiserver cert.
+grader_hint: apiserver certificate includes SAN

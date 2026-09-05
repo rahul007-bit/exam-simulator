@@ -1,0 +1,15 @@
+id: TR-025
+title: Patch Broken Webhook failurePolicy to Ignore
+domain: troubleshooting
+difficulty: hard
+points: 4
+target_context: k3d-cka
+namespace: policy-enforcement
+cluster_scoped: true
+breaking: true
+tags:
+- webhook
+- admission
+description: 'MutatingWebhookConfiguration `admission-hook` is down and blocking pod
+  deployments. Patch `failurePolicy: Ignore` so pods can schedule.'
+grader_hint: Pods can schedule in policy-enforcement

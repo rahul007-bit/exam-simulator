@@ -1,0 +1,21 @@
+id: ST-001
+title: Create PersistentVolume and Bind to PersistentVolumeClaim
+domain: storage
+difficulty: easy
+points: 2
+target_context: k3d-cka
+namespace: data-storage
+cluster_scoped: false
+tags:
+- storage
+- pv
+- pvc
+- hostpath
+description: 'In namespace `data-storage`:
+
+  1. Create a PersistentVolume named `app-pv` with capacity `2Gi`, accessMode `ReadWriteOnce`,
+  hostPath `/mnt/data/app`, and storageClassName `manual`.
+
+  2. Create a PersistentVolumeClaim named `app-pvc` in namespace `data-storage` requesting
+  `2Gi` with accessMode `ReadWriteOnce` and storageClassName `manual`.'
+grader_hint: PV app-pv and PVC app-pvc are Bound.

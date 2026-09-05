@@ -1,0 +1,21 @@
+name: "Mock Exam 05 — Wonka Final Mock"
+description: "The ultimate dress rehearsal exam combining crazy edge cases and advanced scheduling."
+time_limit_minutes: 120
+questions:
+  - TR-C01  # [CRAZY] Silent cgroup eviction
+  - TR-C02  # [CRAZY] Admission webhook deadlock
+  - TR-C03  # [CRAZY] CoreDNS loop forward trap
+  - TR-C04  # [CRAZY] Triple constraint scheduling knot
+  - TR-C06  # [CRAZY] SubPath chown permission trap
+  - TR-C07  # [CRAZY] Stale iptables service drop
+  - TR-030  # [M] CronJob concurrency deadlock
+  - TR-032  # [M] SA automountToken disabled
+  - TR-034  # [M] StatefulSet PVC retention
+  - TR-036  # [M] ExternalName DNS mismatch
+  - WL-C01  # [CRAZY] Dynamic priorityClass preemption
+  - WL-009  # [E] Batch job parallelism
+  - WL-013  # [M] PreStop graceful shutdown
+  - WL-014  # [H] Canary deployment
+  - ST-C01  # [CRAZY] Local PV WaitForFirstConsumer knot
+  - SC-C01  # [CRAZY] RBAC privilege escalation trap
+  - SC-009  # [H] PSS restricted namespace

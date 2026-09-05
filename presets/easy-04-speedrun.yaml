@@ -1,0 +1,21 @@
+name: "Easy Set 04 — Speed Run"
+description: "17 easy questions: timed speed run to maximize your score on easy tasks."
+time_limit_minutes: 60
+questions:
+  - WL-009  # [E] Batch job parallelism
+  - WL-007  # [E] CronJob schedule & history
+  - WL-002  # [E] InitContainer DB gate
+  - TR-021  # [E] Secret base64 decode error
+  - TR-010  # [E] Finalizer deadlock removal
+  - TR-004  # [E] ImagePullBackOff tag typo
+  - TR-003  # [E] Service selector mismatch
+  - TR-002  # [E] ConfigMap missing key
+  - ST-009  # [E] Projected volume aggregation
+  - ST-005  # [E] PV node affinity local
+  - ST-001  # [E] Local PV & PVC binding
+  - SC-010  # [E] Scoped SA role
+  - SC-005  # [E] TLS secret creation & mount
+  - SC-001  # [E] RBAC deployer SA
+  - CA-015  # [E] Microservice services
+  - CA-009  # [E] NodePort service config
+  - CA-007  # [E] Ingress path routing

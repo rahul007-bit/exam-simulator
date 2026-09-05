@@ -1,0 +1,14 @@
+id: WL-014
+title: Deploy Canary Deployment Alongside Production Workload
+domain: workloads
+difficulty: hard
+points: 4
+target_context: k3d-cka
+namespace: traffic-canary
+cluster_scoped: false
+tags:
+- canary
+- deployments
+description: In namespace `traffic-canary`, deploy `app-v1` (3 replicas) and `app-canary`
+  (1 replica) behind single Service `app-svc` on port 80.
+grader_hint: Service app-svc routes to both v1 and canary pods

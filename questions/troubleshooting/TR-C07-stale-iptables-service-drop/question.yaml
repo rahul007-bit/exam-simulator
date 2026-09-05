@@ -1,0 +1,16 @@
+id: TR-C07
+title: 'Chaos: Clear Stale Iptables Drop Rule Blocking Service CIDR'
+domain: troubleshooting
+difficulty: crazy
+points: 6
+target_context: k3d-cka
+namespace: traffic-edge
+cluster_scoped: true
+breaking: true
+tags:
+- crazy
+- iptables
+- services
+description: A rogue iptables rule is dropping packets destined for ClusterIP `10.43.0.0/16`.
+  Identify and remove the drop rule.
+grader_hint: Service connectivity restored

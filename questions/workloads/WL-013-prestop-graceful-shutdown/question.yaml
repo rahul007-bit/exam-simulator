@@ -1,0 +1,14 @@
+id: WL-013
+title: Configure Pod Lifecycle preStop Hook
+domain: workloads
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: graceful-shutdown
+cluster_scoped: false
+tags:
+- lifecycle
+- prestop
+description: Create Pod `graceful-app` in `graceful-shutdown` with a `preStop` exec hook
+  running `['/bin/sh', '-c', 'sleep 15; nginx -s quit']`.
+grader_hint: Pod has preStop hook configured

@@ -1,0 +1,17 @@
+id: CA-011
+title: Renew Expiring Control-Plane Certificates
+domain: cluster-arch
+difficulty: medium
+points: 3
+target_context: kubeadm-vms
+namespace: default
+cluster_scoped: true
+tags:
+- kubeadm
+- certs
+- renew
+description: |
+  As part of periodic maintenance on the `kubeadm-vms` control plane node (`node1`), check the expiration status of the Kubernetes control plane certificates.
+
+  Renew all expiring control plane certificates on `node1` so they have full one-year validity.
+grader_hint: All control plane certificates renewed and valid

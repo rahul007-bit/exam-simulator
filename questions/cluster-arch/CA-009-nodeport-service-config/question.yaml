@@ -1,0 +1,16 @@
+id: CA-009
+title: Expose Application via NodePort Service on Specific Port
+domain: cluster-arch
+difficulty: easy
+points: 2
+target_context: k3d-cka
+namespace: external-services
+cluster_scoped: false
+tags:
+- service
+- nodeport
+- networking
+description: In namespace `external-services`, expose Deployment `web-server` as a Service
+  named `web-nodeport` of type `NodePort` mapping nodePort `30080` to container port
+  `80`.
+grader_hint: Service web-nodeport is type NodePort on port 30080.

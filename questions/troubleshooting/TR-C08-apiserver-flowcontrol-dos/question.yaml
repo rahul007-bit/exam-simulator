@@ -1,0 +1,15 @@
+id: TR-C08
+title: 'Chaos: Fix FlowSchema PriorityAndFairness Self-DOS'
+domain: troubleshooting
+difficulty: crazy
+points: 6
+target_context: k3d-cka
+namespace: kube-system
+cluster_scoped: true
+tags:
+- crazy
+- flowcontrol
+- apiserver
+description: FlowSchema `catch-all-exempt` was modified with 0 matching seats, starving
+  control-plane background controllers. Restore default flowschema.
+grader_hint: FlowSchema restored and controllers reconciling

@@ -1,0 +1,19 @@
+id: TR-011
+title: Resolve OOMKilled Container Termination by Adjusting Limits
+domain: troubleshooting
+difficulty: hard
+points: 4
+target_context: k3d-cka
+namespace: analytics-worker
+cluster_scoped: false
+tags:
+- resources
+- limits
+- oomkilled
+- troubleshooting
+description: 'Pod `data-processor` in namespace `analytics-worker` continuously crashes
+  with `OOMKilled` because its container memory limit is capped at 32Mi.
+
+  Increase the container memory requests to `64Mi` and limits to `256Mi` so the application
+  runs stably.'
+grader_hint: Pod data-processor in analytics-worker runs without OOMKilled exits.

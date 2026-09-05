@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+set -e
+
+CMD="$1"
+
+if [ -z "$CMD" ]; then
+    echo "CKA Exam Simulator - Candidate CLI"
+    echo ""
+    echo "Usage: examctl <command>"
+    echo ""
+    echo "Commands:"
+    echo "  task            View the current active task instructions"
+    echo "  status          View all exam tasks and your completion status"
+    echo "  next            Deploy and navigate to the next task"
+    echo "  prev            Deploy and navigate to the previous task"
+    echo "  jump <number>   Jump to a specific task number (e.g. 'examctl jump 5')"
+    echo "  flag [number]   Flag current task (or task number) for review"
+    echo "  unflag [number] Unflag current task (or task number)"
+    echo ""
+    exit 0
+fi
+
+case "$CMD" in
+    task|current|tasks)
+        exec sudo /root/cka-labs/labctl tasks
+        ;;
+    status)
+        exec sudo /root/cka-labs/labctl status
+        ;;
+    next)
+        exec sudo /root/cka-labs/labctl next
+        ;;
+    prev)
+        exec sudo /root/cka-labs/labctl prev
+        ;;
+    jump)
+        if [ -z "$2" ]; then
+            echo "Error: Specify task number, e.g. 'examctl jump 3'"
+            exit 1
+        fi
+        exec sudo /root/cka-labs/labctl jump "$2"
+        ;;
+    flag)
+        if [ -n "$2" ]; then
+            exec sudo /root/cka-labs/labctl flag "$2"
+        else
+            exec sudo /root/cka-labs/labctl flag
+        fi
+        ;;
+    unflag)
+        if [ -n "$2" ]; then
+            exec sudo /root/cka-labs/labctl unflag "$2"
+        else
+            exec sudo /root/cka-labs/labctl unflag
+        fi
+        ;;
+    help|--help|-h)
+        echo "CKA Exam Simulator - Candidate CLI"
+        echo ""
+        echo "Usage: examctl <command>"
+        echo ""
+        echo "Commands:"
+        echo "  task            View the current active task instructions"
+        echo "  status          View all exam tasks and your completion status"
+        echo "  next            Deploy and navigate to the next task"
+        echo "  prev            Deploy and navigate to the previous task"
+        echo "  jump <number>   Jump to a specific task number (e.g. 'examctl jump 5')"
+        echo "  flag [number]   Flag current task (or task number) for review"
+        echo "  unflag [number] Unflag current task (or task number)"
+        ;;
+    *)
+        echo "Error: Unknown command '$CMD'"
+        echo "Run 'examctl --help' for available commands."
+        exit 1
+        ;;
+esac

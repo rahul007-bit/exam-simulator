@@ -1,0 +1,17 @@
+id: TR-009
+title: Fix Unsatisfiable NodeSelector on Worker Pod
+domain: troubleshooting
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: analytics
+cluster_scoped: false
+tags:
+- scheduling
+- nodeselector
+- labels
+description: |
+  A workload pod named `analytics-worker` in namespace `analytics` is stuck in `Pending` and cannot schedule.
+
+  Investigate the pod's scheduling constraints and remediate the issue so that `analytics-worker` schedules and reaches `1/1 Running`.
+grader_hint: Pod analytics-worker in analytics is 1/1 Running

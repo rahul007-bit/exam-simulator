@@ -1,0 +1,14 @@
+id: TR-027
+title: Add Control-Plane Toleration to Monitoring DaemonSet
+domain: troubleshooting
+difficulty: hard
+points: 4
+target_context: k3d-cka
+namespace: monitoring-ns
+cluster_scoped: true
+tags:
+- daemonset
+- tolerations
+description: DaemonSet `node-exporter` in `monitoring-ns` is missing toleration for
+  `node-role.kubernetes.io/control-plane:NoSchedule`.
+grader_hint: node-exporter runs on all nodes

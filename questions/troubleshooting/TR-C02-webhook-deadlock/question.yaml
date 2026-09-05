@@ -1,0 +1,20 @@
+id: TR-C02
+title: Resolve Admission Webhook Deadlock Blocking Pod Creations
+domain: troubleshooting
+difficulty: crazy
+points: 6
+target_context: k3d-cka
+namespace: cluster-admissions
+cluster_scoped: true
+tags:
+- crazy
+- webhook
+- admission
+- deadlock
+description: |
+  A misconfigured admission webhook is causing all new pod creations across the cluster to fail.
+
+  1. Investigate the cluster admission configurations to identify which webhook is rejecting or timing out on pod creations.
+  2. Resolve the admission block so that pods can be scheduled normally.
+  3. Deploy a verification pod named `recovery-app` with image `nginx:alpine` in namespace `cluster-admissions` and confirm it reaches `1/1 Running`.
+grader_hint: Pod recovery-app is 1/1 Running in cluster-admissions and webhook deadlock resolved

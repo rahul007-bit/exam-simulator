@@ -1,0 +1,14 @@
+id: TR-037
+title: Set Ephemeral Storage Request and Limit on Worker Pod
+domain: troubleshooting
+difficulty: hard
+points: 4
+target_context: k3d-cka
+namespace: log-aggregator
+cluster_scoped: false
+tags:
+- ephemeral-storage
+- eviction
+description: 'Pod `log-cruncher` in `log-aggregator` is evicted due to exceeding ephemeral
+  storage. Add `ephemeral-storage: 500Mi` request and limit.'
+grader_hint: Pod log-cruncher running with storage limits

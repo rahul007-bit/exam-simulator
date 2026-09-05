@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: data-processor
+  namespace: analytics-worker
+spec:
+  containers:
+  - name: processor
+    image: busybox:1.36
+    command: ["/bin/sh", "-c", "python3 -c 'a = [0]*10000000; import time; time.sleep(3600)' 2>/dev/null || sleep 3600"]
+    resources:
+      limits:
+        memory: 32Mi
+      requests:
+        memory: 16Mi

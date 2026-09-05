@@ -1,0 +1,14 @@
+id: WL-011
+title: Configure PodDisruptionBudget for Web Application
+domain: workloads
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: web-application
+cluster_scoped: false
+tags:
+- pdb
+- drain
+description: 'Create PodDisruptionBudget `web-pdb` in `web-application` targeting selector
+  `app=web-app` with `minAvailable: 2`.'
+grader_hint: PDB web-pdb exists with minAvailable 2

@@ -1,0 +1,16 @@
+id: ST-003
+title: Expand Existing PVC Storage Capacity Online
+domain: storage
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: media-store
+cluster_scoped: false
+tags:
+- pvc
+- expansion
+description: |
+  In namespace `media-store`, an existing PVC named `data-vol` is currently mounted and consumed by a running pod named `data-consumer`.
+
+  Expand the PVC storage request from `1Gi` to `3Gi` without terminating or deleting the attached pod.
+grader_hint: PVC data-vol storage request expanded to 3Gi and attached pod remains active

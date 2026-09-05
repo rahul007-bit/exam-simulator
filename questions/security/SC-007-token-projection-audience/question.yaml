@@ -1,0 +1,16 @@
+id: SC-007
+title: Configure ServiceAccount Token Projection with Audience
+domain: security
+difficulty: hard
+points: 4
+target_context: k3d-cka
+namespace: auth-tokens
+cluster_scoped: false
+tags:
+- token
+- projection
+- security
+description: Create Pod `vault-agent` in `auth-tokens` with projected volume `vault-token`
+  specifying `serviceAccountToken` with audience `vault.company.io` and expiration
+  `3600`.
+grader_hint: Pod has token projection with audience vault.company.io

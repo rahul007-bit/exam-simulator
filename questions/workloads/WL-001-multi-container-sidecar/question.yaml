@@ -1,0 +1,19 @@
+id: WL-001
+title: Create Multi-Container Pod with Logging Sidecar
+domain: workloads
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: app-logging
+cluster_scoped: false
+tags:
+- pod
+- sidecar
+- emptydir
+- volumes
+description: |
+  Create a Pod named `order-processor` in namespace `app-logging` containing two containers sharing an `emptyDir` volume mounted at `/var/log`:
+
+  - An application container named `app` using image `busybox:1.36` that writes timestamps to `/var/log/app.log` every 2 seconds (`while true; do date >> /var/log/app.log; sleep 2; done`).
+  - A sidecar container named `log-agent` using image `busybox:1.36` that streams `/var/log/app.log` to standard output (`tail -f /var/log/app.log`).
+grader_hint: Pod order-processor in app-logging has 2/2 running containers sharing emptyDir volume

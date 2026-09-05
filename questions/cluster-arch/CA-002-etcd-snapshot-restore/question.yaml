@@ -1,0 +1,14 @@
+id: CA-002
+title: Restore Cluster State from etcd Snapshot
+domain: cluster-arch
+difficulty: hard
+points: 4
+target_context: kubeadm-vms
+namespace: default
+cluster_scoped: true
+tags:
+- etcd
+- restore
+description: Restore etcd database from `/opt/backup/etcd-snapshot.db` into `/var/lib/etcd-restored`
+  and update static pod manifest.
+grader_hint: Cluster state restored from snapshot

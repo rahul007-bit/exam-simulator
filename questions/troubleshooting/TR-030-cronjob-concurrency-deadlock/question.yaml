@@ -1,0 +1,14 @@
+id: TR-030
+title: Resolve CronJob Concurrency Deadlock
+domain: troubleshooting
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: batch-schedules
+cluster_scoped: false
+tags:
+- cronjob
+- concurrency
+description: 'CronJob `daily-report` in `batch-schedules` is blocked due to `concurrencyPolicy:
+  Forbid` and a hung job. Delete active job and update policy to Replace.'
+grader_hint: CronJob creates new jobs

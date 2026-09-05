@@ -1,0 +1,18 @@
+id: WL-002
+title: Configure InitContainer Dependency Gate on Frontend Pod
+domain: workloads
+difficulty: easy
+points: 2
+target_context: k3d-cka
+namespace: frontend-ui
+cluster_scoped: false
+tags:
+- pod
+- initcontainer
+- networking
+description: 'Create a Pod named `web-app` in namespace `frontend-ui` with an `initContainer`
+  named `wait-for-db` using image `busybox:1.36` that checks for database availability
+  (`sh -c ''until nc -z -w 2 db-service 3306; do sleep 1; done''`).
+
+  The main container `web` should run `nginx:alpine` on port 80.'
+grader_hint: Pod web-app has initContainer wait-for-db and main container web.

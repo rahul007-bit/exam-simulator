@@ -1,0 +1,15 @@
+id: ST-008
+title: Mount Secret and ConfigMap as File Volumes in Specific Paths
+domain: storage
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: app-configs
+cluster_scoped: false
+tags:
+- configmap
+- secrets
+- volumes
+description: Create Pod `config-reader` in `app-configs` mounting Secret `app-secret`
+  at `/etc/secrets/token` and ConfigMap `app-config` at `/etc/config/app.conf`.
+grader_hint: Pod mounts secret and configmap at target paths

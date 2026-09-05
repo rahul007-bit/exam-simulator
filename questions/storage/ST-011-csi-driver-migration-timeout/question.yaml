@@ -1,0 +1,15 @@
+id: ST-011
+title: Troubleshoot CSI Driver Volume Attachment Timeout
+domain: storage
+difficulty: hard
+points: 4
+target_context: k3d-cka
+namespace: db-storage
+cluster_scoped: true
+tags:
+- csi
+- storage
+- attach
+description: VolumeAttachment for pod `db-replica` is stuck in attaching state. Clear
+  stale VolumeAttachment object and recreate pod.
+grader_hint: Pod db-replica achieves Running state

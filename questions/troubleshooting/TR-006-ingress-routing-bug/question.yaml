@@ -1,0 +1,19 @@
+id: TR-006
+title: Fix Ingress Path Routing and Backend Service Mapping
+domain: troubleshooting
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: gateway-ns
+cluster_scoped: false
+tags:
+- ingress
+- networking
+- services
+description: 'Ingress `api-gateway` in namespace `gateway-ns` is misconfigured with
+  wrong backend service names and port mappings.
+
+  Ensure requests to path `/orders` route to service `orders-svc:80` and `/users`
+  route to `users-svc:80`.'
+grader_hint: Ingress api-gateway correctly maps /orders and /users to their respective
+  backend services.

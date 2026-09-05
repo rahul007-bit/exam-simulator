@@ -1,0 +1,23 @@
+id: SC-001
+title: Configure RBAC ServiceAccount & Role for Deployment Management
+domain: security
+difficulty: easy
+points: 2
+target_context: k3d-cka
+namespace: billing-app
+cluster_scoped: false
+tags:
+- rbac
+- serviceaccount
+- role
+- rolebinding
+description: 'In namespace billing-app:
+
+  1. Create a ServiceAccount named app-deployer.
+
+  2. Create a Role named deployment-manager allowing verbs create, get, list, update,
+  delete on resources deployments in API group apps.
+
+  3. Create a RoleBinding named deployer-binding binding Role deployment-manager to
+  ServiceAccount app-deployer.'
+grader_hint: ServiceAccount app-deployer can manage deployments in billing-app namespace.

@@ -1,0 +1,15 @@
+id: CA-003
+title: Upgrade Control-Plane Node with kubeadm
+domain: cluster-arch
+difficulty: hard
+points: 4
+target_context: kubeadm-vms
+namespace: default
+cluster_scoped: true
+tags:
+- kubeadm
+- upgrade
+- control-plane
+description: Upgrade the control-plane node components from v1.29 to v1.30 using `kubeadm
+  upgrade apply v1.30.0` and update kubelet.
+grader_hint: Control-plane node upgraded to target version

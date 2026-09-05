@@ -1,0 +1,16 @@
+id: WL-005
+title: Configure NodeAffinity (Required and Preferred Rules)
+domain: workloads
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: web-cluster
+cluster_scoped: false
+tags:
+- nodeaffinity
+- scheduling
+description: |
+  Create a Pod named `affinity-pod` in namespace `web-cluster` using image `nginx:1.25` with NodeAffinity rules:
+  - A required rule (`requiredDuringSchedulingIgnoredDuringExecution`) ensuring the pod schedules only on nodes with label `topology.kubernetes.io/zone: zone-1`.
+  - A preferred rule (`preferredDuringSchedulingIgnoredDuringExecution`) with weight 1 preferring nodes with label `disk: ssd`.
+grader_hint: Pod has nodeAffinity required and preferred rules and is Running

@@ -1,0 +1,16 @@
+id: CA-C01
+title: 'Chaos: Recover Single-Node etcd from Quorum Loss'
+domain: cluster-arch
+difficulty: crazy
+points: 6
+target_context: kubeadm-vms
+namespace: default
+cluster_scoped: true
+tags:
+- crazy
+- etcd
+- quorum
+- disaster-recovery
+description: 2 of 3 etcd nodes permanently died causing quorum loss. Re-bootstrap
+  cluster from single survivor using `--force-new-cluster`.
+grader_hint: API server and etcd restored to healthy state

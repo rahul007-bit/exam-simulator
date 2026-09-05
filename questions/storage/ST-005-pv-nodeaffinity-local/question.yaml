@@ -1,0 +1,15 @@
+id: ST-005
+title: Create Local PersistentVolume with NodeAffinity
+domain: storage
+difficulty: easy
+points: 2
+target_context: k3d-cka
+namespace: default
+cluster_scoped: true
+tags:
+- pv
+- local
+- nodeaffinity
+description: Create PersistentVolume `local-node-pv` (5Gi, RWO, storageClassName `local-disk`,
+  hostPath `/opt/data`) with nodeAffinity targeting node `k3d-cka-server-0`.
+grader_hint: PV local-node-pv has nodeAffinity matching node

@@ -1,0 +1,19 @@
+id: CA-008
+title: Configure Host-Based Ingress with TLS Termination
+domain: cluster-arch
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: tls-routing
+cluster_scoped: false
+tags:
+- ingress
+- tls
+- hosts
+description: |
+  In namespace `tls-routing`, an existing backend service `app-svc` and a TLS secret named `app-cert` are already provisioned.
+
+  Create an Ingress resource named `secure-app` that:
+  - Directs traffic for host `app.company.org` to service `app-svc` on port 80
+  - Terminates TLS for host `app.company.org` using the existing TLS secret `app-cert`
+grader_hint: Ingress secure-app configured for app.company.org with TLS secret app-cert routing to app-svc:80

@@ -1,0 +1,22 @@
+name: "Mock Exam 06 — Apex Systems Infrastructure"
+description: "Realistic enterprise mock exam covering persistent data pipelines, internal API gateways, workload security hardening, and troubleshooting."
+time_limit_minutes: 120
+pass_threshold_percent: 66
+questions:
+  - ST-012
+  - ST-013
+  - ST-014
+  - CA-015
+  - CA-016
+  - CA-017
+  - SC-010
+  - SC-012
+  - SC-013
+  - TR-001
+  - TR-003
+  - TR-006
+  - TR-008
+  - WL-001
+  - WL-003
+  - ST-002
+  - SC-001

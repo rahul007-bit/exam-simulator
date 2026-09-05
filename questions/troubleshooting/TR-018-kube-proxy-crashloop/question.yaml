@@ -1,0 +1,19 @@
+id: TR-018
+title: Restore Kube-Proxy DaemonSet Operation
+domain: troubleshooting
+difficulty: hard
+points: 4
+target_context: kubeadm-vms
+namespace: kube-system
+cluster_scoped: true
+breaking: false
+tags:
+- kube-proxy
+- daemonset
+- troubleshooting
+description: |
+  Kube-proxy pods in namespace `kube-system` on the `kubeadm-vms` cluster are crashlooping due to an invalid configuration setting applied to the `kube-proxy` ConfigMap.
+
+  Investigate the logs and events of the failing `kube-proxy` pods.
+  Correct the invalid configuration in the `kube-proxy` ConfigMap in namespace `kube-system`, restart or recreate the pods, and ensure that all `kube-proxy` pods across the cluster nodes are healthy and `1/1 Running`.
+grader_hint: All kube-proxy pods in kube-system are 1/1 Running with valid config

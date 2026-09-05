@@ -1,0 +1,23 @@
+id: SC-010
+title: Configure ServiceAccount and Scoped Configuration Role
+domain: security
+difficulty: easy
+points: 2
+target_context: k3d-cka
+namespace: secure-pipeline
+cluster_scoped: false
+breaking: false
+preserve_state: true
+tags:
+- security
+- rbac
+- serviceaccount
+description: 'In namespace secure-pipeline:
+
+  1. Create a ServiceAccount named pipeline-runner.
+
+  2. Create a Role named config-manager allowing verbs get, list, watch on resources
+  configmaps and secrets.
+
+  3. Create a RoleBinding named pipeline-config-binding binding Role config-manager
+  to ServiceAccount pipeline-runner.'

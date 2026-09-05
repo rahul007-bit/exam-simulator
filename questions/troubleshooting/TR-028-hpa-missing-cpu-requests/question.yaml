@@ -1,0 +1,14 @@
+id: TR-028
+title: Add CPU Requests to Enable HPA Autoscaling
+domain: troubleshooting
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: api-gateway
+cluster_scoped: false
+tags:
+- hpa
+- resources
+description: HPA `api-scaler` in `api-gateway` reports `<unknown>/50%` CPU because deployment
+  `api-server` has no CPU requests defined.
+grader_hint: Deployment api-server has CPU requests

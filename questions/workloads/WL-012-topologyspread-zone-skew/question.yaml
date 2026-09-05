@@ -1,0 +1,15 @@
+id: WL-012
+title: Configure TopologySpreadConstraints Across Zones
+domain: workloads
+difficulty: hard
+points: 4
+target_context: k3d-cka
+namespace: multi-zone-app
+cluster_scoped: false
+tags:
+- topologyspread
+- zones
+description: 'Configure Deployment `zone-spread` in `multi-zone-app` with `topologySpreadConstraints`
+  specifying `maxSkew: 1`, `topologyKey: topology.kubernetes.io/zone`, and `whenUnsatisfiable:
+  DoNotSchedule`.'
+grader_hint: Topology spread constraint configured with maxSkew 1

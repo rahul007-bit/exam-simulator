@@ -1,0 +1,14 @@
+id: TR-019
+title: Fix InitContainer DNS Resolution Deadlock
+domain: troubleshooting
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: frontend-services
+cluster_scoped: false
+tags:
+- initcontainer
+- dns
+description: Pod `web-frontend` in `frontend-services` is stuck in Init:0/1 because initContainer
+  is checking wrong DB host FQDN. Fix target service hostname.
+grader_hint: Pod web-frontend is 1/1 Running

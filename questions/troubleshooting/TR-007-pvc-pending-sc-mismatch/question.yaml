@@ -1,0 +1,18 @@
+id: TR-007
+title: Fix PVC Stuck in Pending due to Invalid StorageClass
+domain: troubleshooting
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: data-ops
+cluster_scoped: false
+tags:
+- storage
+- pvc
+- storageclass
+description: 'PVC data-claim in namespace data-ops is stuck in Pending because it
+  specifies a non-existent StorageClass fast-nvme-ssd.
+
+  Update the PVC configuration or provision the correct StorageClass using standard
+  local storage so data-claim becomes Bound.'
+grader_hint: PVC data-claim in data-ops is Bound.

@@ -1,0 +1,17 @@
+id: WL-003
+title: Configure Deployment RollingUpdate Strategy Parameters
+domain: workloads
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: order-services
+cluster_scoped: false
+tags:
+- deployment
+- rollingupdate
+- maxsurge
+description: |
+  Create a Deployment named `payment-api` in namespace `order-services` with:
+  - 4 replicas using image `nginx:1.25`
+  - A RollingUpdate strategy configured with `maxSurge: 1` and `maxUnavailable: 0`
+grader_hint: "Deployment payment-api has 4 replicas and RollingUpdate strategy with maxSurge: 1 and maxUnavailable: 0"

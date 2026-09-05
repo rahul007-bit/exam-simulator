@@ -1,0 +1,14 @@
+id: CA-005
+title: Safely Drain Worker Node
+domain: cluster-arch
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: default
+cluster_scoped: true
+tags:
+- drain
+- maintenance
+description: |
+  Set the worker node `k3d-dev-agent-0` to be unavailable and evict all pods currently running on it, ignoring DaemonSets and local storage.
+grader_hint: Worker node k3d-dev-agent-0 drained (SchedulingDisabled) and workloads evicted

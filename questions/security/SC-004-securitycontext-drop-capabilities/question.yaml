@@ -1,0 +1,17 @@
+id: SC-004
+title: Drop All Capabilities and Add NET_ADMIN Capability
+domain: security
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: net-tools
+cluster_scoped: false
+tags:
+- capabilities
+- securitycontext
+- net_admin
+description: |
+  Create a Pod named `net-monitor` in namespace `net-tools` using image `busybox:1.36` running the command `sleep 3600`.
+
+  Configure the container securityContext to drop `ALL` capabilities and add the `NET_ADMIN` capability.
+grader_hint: Pod net-monitor drops ALL capabilities and adds NET_ADMIN

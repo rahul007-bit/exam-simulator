@@ -1,0 +1,14 @@
+id: CA-012
+title: Deploy Static Pod for Cluster Node Health Monitor
+domain: cluster-arch
+difficulty: hard
+points: 4
+target_context: kubeadm-vms
+namespace: default
+cluster_scoped: true
+tags:
+- staticpod
+- manifests
+description: Create a static pod manifest `/etc/kubernetes/manifests/node-monitor.yaml`
+  running `busybox:1.36` (sleep 3600).
+grader_hint: Static pod node-monitor is running

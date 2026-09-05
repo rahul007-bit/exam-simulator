@@ -1,0 +1,18 @@
+id: ST-002
+title: Create Dynamic Provisioning StorageClass with Retain Policy
+domain: storage
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: default
+cluster_scoped: true
+tags:
+- storage
+- storageclass
+- retain
+description: |
+  Create a new StorageClass named `fast-retain` configured with:
+  - Provisioner: `rancher.io/local-path`
+  - Reclaim policy: `Retain`
+  - Volume binding mode: `WaitForFirstConsumer`
+grader_hint: StorageClass fast-retain exists with reclaimPolicy Retain and volumeBindingMode WaitForFirstConsumer

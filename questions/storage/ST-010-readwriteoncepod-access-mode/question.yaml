@@ -1,0 +1,15 @@
+id: ST-010
+title: Configure ReadWriteOncePod Access Mode on PVC
+domain: storage
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: exclusive-storage
+cluster_scoped: false
+tags:
+- storage
+- rwop
+- accessmodes
+description: Create PVC `exclusive-claim` in `exclusive-storage` using accessMode `ReadWriteOncePod`
+  with capacity `1Gi`.
+grader_hint: PVC exclusive-claim has accessMode ReadWriteOncePod

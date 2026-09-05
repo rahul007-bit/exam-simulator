@@ -1,0 +1,19 @@
+id: ST-006
+title: Deploy StatefulSet with Dynamic VolumeClaimTemplates
+domain: storage
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: redis-cluster
+cluster_scoped: false
+tags:
+- statefulset
+- volumeclaimtemplates
+description: |
+  In namespace `redis-cluster`, create a headless Service named `redis-svc` targeting port 6379 with `clusterIP: None`.
+
+  Create a StatefulSet named `redis-cluster` with:
+  - 2 replicas using image `redis:7-alpine`
+  - `serviceName: redis-svc`
+  - A volumeClaimTemplate named `data` requesting `1Gi` storage from StorageClass `local-path` mounted at `/data`
+grader_hint: StatefulSet redis-cluster has 2 replicas running with bound volumeClaimTemplates

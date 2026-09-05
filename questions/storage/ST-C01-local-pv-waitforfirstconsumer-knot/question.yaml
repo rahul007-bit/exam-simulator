@@ -1,0 +1,15 @@
+id: ST-C01
+title: 'Chaos: Local PV Binding Deadlock with Conflicting NodeSelectors'
+domain: storage
+difficulty: crazy
+points: 6
+target_context: k3d-cka
+namespace: local-storage
+cluster_scoped: true
+tags:
+- crazy
+- storage
+- waitforfirstconsumer
+description: PVC is unbound because Local PV has nodeAffinity for Node A while Pod
+  has nodeSelector for Node B. Fix node constraints so PVC binds.
+grader_hint: PVC in local-storage is Bound and pod running

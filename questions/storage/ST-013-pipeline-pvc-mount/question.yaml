@@ -1,0 +1,21 @@
+id: ST-013
+title: Deploy Data Worker with PersistentVolumeClaim
+domain: storage
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: storage-pipeline
+cluster_scoped: false
+breaking: false
+preserve_state: true
+tags:
+- storage
+- persistentvolumeclaim
+- deployment
+description: 'In namespace storage-pipeline:
+
+  1. Create a PersistentVolumeClaim named pipeline-pvc requesting 5Gi with storageClassName:
+  pipeline-sc and accessModes: [ReadWriteOnce].
+
+  2. Create a Deployment named pipeline-worker (1 replica, image: nginx:latest) mounting
+  pipeline-pvc at /var/pipeline.'

@@ -1,0 +1,17 @@
+id: TR-021
+title: Fix Base64 Encoding Error in Pod Secret Reference
+domain: troubleshooting
+difficulty: medium
+points: 2
+target_context: k3d-cka
+namespace: payments
+cluster_scoped: false
+tags:
+- secrets
+- base64
+- troubleshooting
+description: |
+  Pod `crypto-service` in namespace `payments` fails to start and remains stuck in `CreateContainerConfigError`.
+
+  Investigate the pod and its referenced secret `api-keys`. Fix the issue with the secret so that the pod `crypto-service` starts successfully and reaches `1/1 Running`.
+grader_hint: Secret api-keys decodes cleanly and crypto-service pod is Running

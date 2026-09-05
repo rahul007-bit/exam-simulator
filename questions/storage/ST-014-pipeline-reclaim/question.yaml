@@ -1,0 +1,22 @@
+id: ST-014
+title: Decommission Worker and Retain Underlying Storage Volume
+domain: storage
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: storage-pipeline
+cluster_scoped: false
+breaking: false
+preserve_state: true
+tags:
+- storage
+- reclaim-policy
+- decommission
+description: 'In namespace storage-pipeline:
+
+  1. Delete deployment pipeline-worker.
+
+  2. Delete PersistentVolumeClaim pipeline-pvc.
+
+  3. Verify that PersistentVolume pipeline-pv transitions to Released status and is
+  preserved without deletion.'

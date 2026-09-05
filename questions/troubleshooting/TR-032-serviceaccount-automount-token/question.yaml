@@ -1,0 +1,17 @@
+id: TR-032
+title: Enable automountServiceAccountToken on Pod
+domain: troubleshooting
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: order-auth
+cluster_scoped: false
+tags:
+- serviceaccount
+- token
+description: |
+  Pod `api-client` in namespace `order-auth` cannot contact the Kubernetes API because ServiceAccount token automounting was disabled on the pod specification.
+
+  Investigate pod `api-client` in namespace `order-auth`.
+  Configure token automounting so that the ServiceAccount token is automatically mounted into the pod, recreate or update the pod, and verify that `api-client` reaches `1/1 Running`.
+grader_hint: Pod api-client in order-auth automounts serviceaccount token and is Ready

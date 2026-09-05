@@ -1,0 +1,14 @@
+id: WL-006
+title: Deploy Monitoring DaemonSet on Worker Nodes
+domain: workloads
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: node-monitoring
+cluster_scoped: true
+tags:
+- daemonset
+- scheduling
+description: |
+  Create a DaemonSet named `system-monitor` in namespace `node-monitoring` using image `nginx:alpine` that runs on all worker nodes.
+grader_hint: DaemonSet runs on worker nodes

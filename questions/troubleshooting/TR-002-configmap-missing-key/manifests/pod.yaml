@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: auth-api
+  namespace: auth-system
+  labels:
+    app: auth-api
+spec:
+  containers:
+  - name: auth
+    image: nginx:alpine
+    env:
+    - name: AUTH_SECRET_KEY
+      valueFrom:
+        configMapKeyRef:
+          name: auth-config
+          key: SECRET_KEY

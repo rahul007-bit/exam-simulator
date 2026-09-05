@@ -1,0 +1,16 @@
+id: WL-C01
+title: 'Chaos: Trigger Dynamic Pod Preemption via PriorityClasses'
+domain: workloads
+difficulty: crazy
+points: 6
+target_context: k3d-cka
+namespace: task-scheduler
+cluster_scoped: true
+tags:
+- crazy
+- priorityclass
+- preemption
+description: Create PriorityClasses `high-priority` (value 1000000) and `low-priority`
+  (value 1000). Deploy high-priority pod that triggers preemption of low-priority
+  pods on saturated node.
+grader_hint: High priority pod preempts and runs 1/1

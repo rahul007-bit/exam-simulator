@@ -1,0 +1,15 @@
+id: TR-C04
+title: 'Chaos: Untangle Triple-Constraint NodeAffinity and Taint Knot'
+domain: troubleshooting
+difficulty: crazy
+points: 6
+target_context: k3d-cka
+namespace: compute-pool
+cluster_scoped: true
+tags:
+- crazy
+- affinity
+- taints
+description: 5 pods in `compute-pool` are deadlocked due to circular nodeAffinity, zone
+  taints, and podAntiAffinity. Resolve constraints so all 5 pods schedule.
+grader_hint: All 5 pods in compute-pool are Running

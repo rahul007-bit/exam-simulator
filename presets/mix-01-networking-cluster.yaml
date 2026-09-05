@@ -1,0 +1,21 @@
+name: "Mix Set 01 — Networking & Cluster"
+description: "17 mixed questions (4 easy + 13 medium) focusing on networking, cluster operations, and ingress."
+time_limit_minutes: 120
+questions:
+  - CA-007  # [E] Ingress path routing
+  - CA-009  # [E] NodePort service config
+  - CA-015  # [E] Microservice services
+  - WL-009  # [E] Batch job parallelism
+  - CA-001  # [M] etcd snapshot backup
+  - CA-004  # [M] kubeadm worker upgrade
+  - CA-005  # [M] Safely drain worker node
+  - CA-006  # [M] kubeadm token & node join
+  - CA-008  # [M] Ingress host TLS termination
+  - CA-010  # [M] CoreDNS custom hosts rewrite
+  - CA-011  # [M] kubeadm certs renewal
+  - CA-013  # [M] Extract cluster network CIDR
+  - CA-016  # [M] TLS ingress gateway
+  - TR-005  # [M] CoreDNS corefile syntax
+  - TR-006  # [M] Ingress routing bug
+  - TR-015  # [M] Headless service DNS
+  - TR-024  # [M] NodePort targetPort mismatch

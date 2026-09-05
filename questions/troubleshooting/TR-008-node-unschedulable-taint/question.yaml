@@ -1,0 +1,21 @@
+id: TR-008
+title: Clear Invalid Taint and Uncordon Worker Node
+domain: troubleshooting
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: default
+cluster_scoped: true
+breaking: true
+tags:
+- nodes
+- taints
+- cordon
+- scheduling
+description: 'Worker node is tainted with `maintenance=true:NoSchedule` and cordoned,
+  preventing workloads in namespace `production-apps` from scheduling.
+
+  Remove the taint, uncordon all worker nodes, and ensure the deployment `mission-critical`
+  has all replicas Running.'
+grader_hint: Worker node uncordoned, taint removed, and deployment mission-critical
+  is 2/2 ready.

@@ -1,0 +1,18 @@
+name: "Medium Exam 01 — Full Curriculum"
+description: "14-question CKA practice exam matching the official CNCF domain blueprint (Troubleshooting, Cluster Arch, Services/Security, Workloads, Storage)."
+time_limit_minutes: 120
+questions:
+  - CA-001  # [CA] etcd snapshot backup
+  - CA-004  # [CA] kubeadm worker upgrade
+  - CA-006  # [CA] kubeadm token & node join
+  - SC-002  # [Sec] ClusterRole & Binding auditor
+  - SC-004  # [Sec] Drop capabilities & add NET_ADMIN
+  - SC-006  # [Sec] RBAC resourceNames restriction
+  - WL-001  # [WL] Logging sidecar multi-container
+  - WL-004  # [WL] HPA target CPU utilization
+  - ST-002  # [ST] Dynamic StorageClass retain
+  - ST-003  # [ST] PVC online expansion
+  - TR-001  # [TR] CrashLoopBackOff cmd probe
+  - TR-006  # [TR] Ingress routing bug
+  - TR-007  # [TR] PVC pending StorageClass mismatch
+  - TR-012  # [TR] RBAC 403 secrets permission

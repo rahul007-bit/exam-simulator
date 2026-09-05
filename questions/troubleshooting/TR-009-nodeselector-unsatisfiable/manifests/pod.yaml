@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: analytics-worker
+  namespace: analytics
+  labels:
+    app: analytics
+spec:
+  nodeSelector:
+    disk: nvme-fast
+  containers:
+  - name: worker
+    image: nginx:alpine

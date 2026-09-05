@@ -1,0 +1,17 @@
+id: CA-006
+title: Generate Join Token and Join Worker Node
+domain: cluster-arch
+difficulty: medium
+points: 3
+target_context: kubeadm-vms
+namespace: default
+cluster_scoped: true
+tags:
+- kubeadm
+- token
+- join
+description: |
+  Given the cluster context `kubeadm-vms`, a new worker node `node3` has been provisioned but has not yet joined the cluster.
+
+  Generate a new join token on the control plane, join `node3` to the cluster as a worker node, and ensure it reaches `Ready` status.
+grader_hint: Worker node node3 joined the cluster and status is Ready

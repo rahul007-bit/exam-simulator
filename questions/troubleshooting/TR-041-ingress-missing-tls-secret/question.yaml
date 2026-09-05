@@ -1,0 +1,19 @@
+id: TR-041
+title: Create Missing TLS Secret for Ingress HTTPS
+domain: troubleshooting
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: tls-ingress
+cluster_scoped: false
+tags:
+- ingress
+- tls
+- secrets
+description: |
+  An Ingress named `secure-web` in namespace `tls-ingress` was configured to provide HTTPS access, but it is reporting errors because its referenced TLS secret does not exist.
+
+  A signed certificate and private key have been provided at `/tmp/tls/tls.crt` and `/tmp/tls/tls.key`.
+
+  Inspect the Ingress `secure-web` to identify the expected secret name, create the required TLS Secret in namespace `tls-ingress` using the provided certificate files, and ensure the Ingress terminates TLS properly.
+grader_hint: Secret web-tls-cert exists with valid tls keys in namespace tls-ingress

@@ -1,0 +1,17 @@
+id: CA-004
+title: Upgrade Worker Node with kubeadm
+domain: cluster-arch
+difficulty: medium
+points: 3
+target_context: kubeadm-vms
+namespace: default
+cluster_scoped: true
+tags:
+- kubeadm
+- upgrade
+- worker
+description: |
+  Given the cluster context `kubeadm-vms`, upgrade worker node `node2` to match the version of the control plane node `node1`.
+
+  Ensure that you safely drain the node before maintenance, and return it to an active, schedulable state once the upgrade is complete.
+grader_hint: Worker node node2 upgraded to match control plane, uncordoned and Ready

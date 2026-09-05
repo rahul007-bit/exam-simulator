@@ -1,0 +1,15 @@
+id: ST-007
+title: Recover Data from Released PersistentVolume
+domain: storage
+difficulty: hard
+points: 4
+target_context: k3d-cka
+namespace: backup-vault
+cluster_scoped: true
+tags:
+- pv
+- reclaim
+- released
+description: PV `backup-data-pv` is in `Released` status. Clear the `claimRef` in
+  PV spec so it becomes `Available` for rebinding.
+grader_hint: PV backup-data-pv is in Available status

@@ -1,0 +1,14 @@
+id: TR-038
+title: Override Non-Root User ID in Pod SecurityContext
+domain: troubleshooting
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: restricted-runtime
+cluster_scoped: false
+tags:
+- securitycontext
+- nonroot
+description: 'Pod `alpine-runner` in `restricted-runtime` has `runAsNonRoot: true` but image
+  runs as user 0 (root). Add `runAsUser: 1000` to SecurityContext.'
+grader_hint: Pod alpine-runner is 1/1 Running

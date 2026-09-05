@@ -1,0 +1,14 @@
+id: TR-033
+title: Fix Kube-APIServer Static Pod Manifest Typo
+domain: troubleshooting
+difficulty: hard
+points: 4
+target_context: kubeadm-vms
+namespace: default
+cluster_scoped: true
+tags:
+- staticpod
+- apiserver
+description: Static pod manifest in `/etc/kubernetes/manifests/kube-apiserver.yaml`
+  has invalid flag. Correct the flag.
+grader_hint: API server static pod is running

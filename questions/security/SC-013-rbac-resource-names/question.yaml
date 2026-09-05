@@ -1,0 +1,20 @@
+id: SC-013
+title: Restrict RBAC Access to Specific ConfigMap and Secret Names
+domain: security
+difficulty: hard
+points: 4
+target_context: k3d-cka
+namespace: secure-pipeline
+cluster_scoped: false
+breaking: false
+preserve_state: true
+tags:
+- security
+- rbac
+- resourcenames
+description: 'In namespace secure-pipeline:
+
+  1. Create ConfigMap app-config and Secret app-secret.
+
+  2. Update Role config-manager so that permissions get, list, watch apply ONLY to
+  ConfigMap app-config and Secret app-secret using resourceNames.'

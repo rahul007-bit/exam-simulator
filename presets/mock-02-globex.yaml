@@ -1,0 +1,21 @@
+name: "Mock Exam 02 — Globex Systems Outage"
+description: "Incident-heavy mock exam with DNS, networking, and probe troubleshooting."
+time_limit_minutes: 120
+questions:
+  - TR-005  # [M] CoreDNS syntax error
+  - TR-011  # [H] OOMKilled memory limits
+  - TR-013  # [M] Rollout rollback
+  - TR-015  # [M] Headless service DNS
+  - TR-017  # [M] PVC accessMode conflict
+  - TR-019  # [M] InitContainer DNS failure
+  - TR-021  # [E] Secret base64 decode error
+  - TR-022  # [M] CPU quota throttling
+  - TR-024  # [M] NodePort targetPort mismatch
+  - TR-028  # [M] HPA missing CPU requests
+  - WL-004  # [M] HPA configuration
+  - WL-007  # [E] CronJob history
+  - WL-010  # [M] Probes liveness/readiness/startup
+  - ST-003  # [M] PVC online expansion
+  - ST-008  # [M] Mount Secret/ConfigMap volumes
+  - CA-009  # [E] NodePort service
+  - SC-003  # [M] SecurityContext non-root

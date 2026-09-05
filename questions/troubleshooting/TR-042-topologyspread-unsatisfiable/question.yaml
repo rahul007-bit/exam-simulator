@@ -1,0 +1,20 @@
+id: TR-042
+title: Fix Unsatisfiable TopologySpreadConstraint on Zone-Spread App
+domain: troubleshooting
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: geo-distribution
+cluster_scoped: false
+tags:
+- scheduling
+- topologyspreadconstraints
+- zones
+description: 'Deployment `zone-spread-app` in namespace `geo-distribution` has 4 replicas
+  but pods are stuck in `Pending`. The `topologySpreadConstraints` uses
+  `whenUnsatisfiable: DoNotSchedule` with `topologyKey: topology.kubernetes.io/zone`,
+  but no nodes have zone labels.
+
+Fix the constraint (change to `ScheduleAnyway`) or label nodes with zone topology
+so all 4 pods reach `Running`.'
+grader_hint: All 4 zone-spread-app pods in geo-distribution are 1/1 Running.

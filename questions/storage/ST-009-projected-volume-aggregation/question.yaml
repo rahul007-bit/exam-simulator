@@ -1,0 +1,14 @@
+id: ST-009
+title: Configure Projected Volume Aggregating Secret and DownwardAPI
+domain: storage
+difficulty: easy
+points: 2
+target_context: k3d-cka
+namespace: app-credentials
+cluster_scoped: false
+tags:
+- projected
+- downwardapi
+description: Create Pod `projected-pod` in `app-credentials` with a projected volume
+  combining Secret `vault-creds` and downwardAPI (pod name and namespace).
+grader_hint: Pod projected-pod has projected volume configured

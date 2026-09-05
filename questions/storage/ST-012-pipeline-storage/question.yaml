@@ -1,0 +1,21 @@
+id: ST-012
+title: Provision Persistent Storage for Data Pipeline
+domain: storage
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: storage-pipeline
+cluster_scoped: false
+breaking: false
+preserve_state: true
+tags:
+- storage
+- persistentvolume
+- storageclass
+description: 'In namespace storage-pipeline:
+
+  1. Create a StorageClass named pipeline-sc using provisioner rancher.io/local-path,
+  reclaimPolicy: Retain, and volumeBindingMode: WaitForFirstConsumer.
+
+  2. Create a PersistentVolume named pipeline-pv with capacity 5Gi, accessMode ReadWriteOnce,
+  hostPath: /tmp/pipeline-data, and storageClassName: pipeline-sc.'

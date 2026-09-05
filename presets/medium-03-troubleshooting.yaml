@@ -1,0 +1,18 @@
+name: "Medium Exam 03 — Full Curriculum"
+description: "14-question CKA practice exam matching the official CNCF domain blueprint (Troubleshooting, Cluster Arch, Services/Security, Workloads, Storage)."
+time_limit_minutes: 120
+questions:
+  - CA-002  # [CA] Restore cluster from etcd snapshot
+  - CA-003  # [CA] Upgrade control-plane node
+  - CA-007  # [CA] Ingress path routing
+  - SC-001  # [Sec] RBAC ServiceAccount & Role
+  - SC-009  # [Sec] Enforce PSS restricted mode
+  - SC-010  # [Sec] Scoped configuration role
+  - WL-002  # [WL] InitContainer dependency gate
+  - WL-010  # [WL] Probes liveness readiness startup
+  - ST-008  # [ST] Mount secret & ConfigMap volumes
+  - ST-010  # [ST] ReadWriteOncePod access mode
+  - TR-017  # [TR] PVC ReadWriteMany on RWO
+  - TR-019  # [TR] InitContainer DNS deadlock
+  - TR-021  # [TR] Secret base64 decode error
+  - TR-024  # [TR] NodePort targetPort routing

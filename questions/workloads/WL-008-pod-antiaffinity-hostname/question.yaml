@@ -1,0 +1,16 @@
+id: WL-008
+title: Configure PodAntiAffinity to Spread Replicas Across Nodes
+domain: workloads
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: resilient-app
+cluster_scoped: false
+tags:
+- antiaffinity
+- spread
+description: |
+  Create a Deployment named `spread-web` in namespace `resilient-app` with:
+  - 2 replicas using image `nginx:1.25`
+  - A `podAntiAffinity` rule configured on topology key `kubernetes.io/hostname` ensuring that replicas run on separate nodes.
+grader_hint: Replicas run on separate nodes via podAntiAffinity

@@ -1,0 +1,18 @@
+id: CA-007
+title: Configure Ingress Path Routing for Auth and Pay Services
+domain: cluster-arch
+difficulty: easy
+points: 2
+target_context: k3d-cka
+namespace: edge-routing
+cluster_scoped: false
+tags:
+- ingress
+- networking
+- routing
+description: 'In namespace `edge-routing`, create an Ingress named `app-ingress`:
+
+  - Path `/auth` (Prefix) -> service `auth-svc:80`
+
+  - Path `/pay` (Prefix) -> service `pay-svc:80`.'
+grader_hint: Ingress app-ingress correctly maps /auth and /pay.

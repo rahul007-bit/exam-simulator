@@ -1,0 +1,17 @@
+id: TR-014
+title: Clear Leftover NoSchedule Cordon on Node
+domain: troubleshooting
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: prod-workers
+cluster_scoped: true
+breaking: true
+tags:
+- nodes
+- cordon
+description: |
+  A worker node in the cluster was previously marked for maintenance and remains cordoned, preventing workloads in namespace `prod-workers` from scheduling.
+
+  Identify the cordoned worker node, uncordon it to return it to active service, and ensure Deployment `worker-pool` reaches 3/3 ready replicas.
+grader_hint: worker-pool has 3/3 ready pods after uncordoning

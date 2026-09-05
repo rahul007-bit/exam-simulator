@@ -1,0 +1,20 @@
+id: WL-004
+title: Implement HorizontalPodAutoscaler with Target CPU Utilization
+domain: workloads
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: customer-portal
+cluster_scoped: false
+tags:
+- hpa
+- autoscaling
+- metrics
+description: |
+  In namespace `customer-portal`, an existing Deployment named `scalable-web` is deployed.
+
+  Create a HorizontalPodAutoscaler named `web-scaler` that scales `scalable-web` with:
+  - Minimum replicas: 2
+  - Maximum replicas: 8
+  - Target average CPU utilization: 60%
+grader_hint: HPA web-scaler is created with min 2, max 8, target CPU 60%

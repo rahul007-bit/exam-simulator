@@ -1,0 +1,17 @@
+id: TR-010
+title: Clear Stuck Finalizer on Deleting Resource
+domain: troubleshooting
+difficulty: easy
+points: 2
+target_context: k3d-cka
+namespace: legacy-services
+cluster_scoped: false
+tags:
+- finalizers
+- troubleshooting
+- lifecycle
+description: 'ConfigMap `legacy-vault` in namespace `legacy-services` is stuck in `Terminating`
+  state due to a blocking custom finalizer `company.org/backup-protection`.
+
+  Remove the finalizer so the resource successfully deletes.'
+grader_hint: ConfigMap legacy-vault in legacy-services is completely deleted.

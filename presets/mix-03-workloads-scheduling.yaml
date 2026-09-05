@@ -1,0 +1,21 @@
+name: "Mix Set 03 — Workloads & Scheduling"
+description: "17 mixed questions (5 easy + 12 medium) focusing on workload management, scheduling, and probes."
+time_limit_minutes: 120
+questions:
+  - SC-010  # [E] Scoped SA role
+  - ST-005  # [E] PV node affinity local
+  - WL-002  # [E] InitContainer DB gate
+  - WL-007  # [E] CronJob schedule & history
+  - TR-002  # [E] ConfigMap missing key
+  - WL-001  # [M] Multi-container sidecar
+  - WL-003  # [M] Deployment rolling update
+  - WL-004  # [M] HPA CPU target
+  - WL-005  # [M] Node affinity preferred & required
+  - WL-006  # [M] DaemonSet worker nodes
+  - WL-008  # [M] Pod anti-affinity hostname
+  - WL-010  # [M] Probes liveness readiness startup
+  - WL-011  # [M] Pod disruption budget minAvailable
+  - WL-013  # [M] PreStop graceful shutdown
+  - TR-008  # [M] Node unschedulable taint
+  - TR-009  # [M] NodeSelector unsatisfiable
+  - TR-028  # [M] HPA missing CPU requests

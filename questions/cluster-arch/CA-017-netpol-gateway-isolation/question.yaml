@@ -1,0 +1,23 @@
+id: CA-017
+title: Enforce NetworkPolicy Ingress Restrictions on Backend Service
+domain: security
+difficulty: hard
+points: 4
+target_context: k3d-cka
+namespace: gateway-mesh
+cluster_scoped: false
+breaking: false
+preserve_state: true
+tags:
+- security
+- networkpolicy
+- ingress
+description: 'In namespace gateway-mesh:
+
+  1. Create a NetworkPolicy named protect-order-svc targeting pods with label app:
+  order-svc.
+
+  2. Allow Ingress traffic to order-svc pods on port 80 ONLY from pods with label
+  app: auth-svc.
+
+  3. Ensure all other ingress traffic to order-svc is restricted.'

@@ -1,0 +1,14 @@
+id: TR-020
+title: Resolve Pod Anti-Affinity Scheduling Deadlock
+domain: troubleshooting
+difficulty: hard
+points: 4
+target_context: k3d-cka
+namespace: web-tier
+cluster_scoped: false
+tags:
+- antiaffinity
+- scheduling
+description: Deployment `web-redundant` in `web-tier` has 4 replicas but only
+  2 nodes exist with hard `podAntiAffinity`. Convert to soft affinity (`preferredDuringScheduling`).
+grader_hint: Deployment web-redundant has 4/4 ready replicas

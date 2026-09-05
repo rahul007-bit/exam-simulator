@@ -1,0 +1,21 @@
+name: "Mock Exam 04 — Umbrella Corp Chaos Day"
+description: "Chaos and multi-failure exam testing resilience under cascading failure conditions."
+time_limit_minutes: 120
+questions:
+  - TR-014  # [M] Node cordoned unschedulable
+  - TR-016  # [H] SubPath permission denied
+  - TR-018  # [H] Kube-proxy crashloop
+  - TR-020  # [H] Pod anti-affinity deadlock
+  - TR-023  # [H] StorageClass WaitForFirstConsumer
+  - TR-025  # [H] Webhook failurePolicy ignore
+  - TR-027  # [H] DaemonSet controlplane toleration
+  - TR-029  # [H] PDB drain blocker
+  - TR-031  # [H] Shared volume race condition
+  - TR-042  # [H] TopologySpread unsatisfiable
+  - WL-005  # [M] NodeAffinity preferred/required
+  - WL-008  # [M] PodAntiAffinity hostname
+  - WL-012  # [H] TopologySpread zone skew
+  - ST-004  # [M] Multi-subpath volume
+  - ST-010  # [M] ReadWriteOncePod access
+  - CA-008  # [M] Ingress host TLS
+  - SC-004  # [M] SecurityContext drop capabilities

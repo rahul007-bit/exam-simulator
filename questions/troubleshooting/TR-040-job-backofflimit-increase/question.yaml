@@ -1,0 +1,18 @@
+id: TR-040
+title: Increase Batch Job backoffLimit and Fix Failing Command
+domain: troubleshooting
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: data-import
+cluster_scoped: false
+tags:
+- jobs
+- backofflimit
+description: |
+  A batch Job named `batch-sync` in namespace `data-import` failed repeatedly and terminated due to exceeding its retry limit (`BackoffLimitExceeded`).
+
+  Investigate the failure of Job `batch-sync` in namespace `data-import`.
+  Resolve the container command error so it completes successfully, and ensure the Job is configured with `backoffLimit: 10`.
+  Recreate the Job named `batch-sync` and verify that it runs to completion (1 succeeded pod).
+grader_hint: Job batch-sync completes with 1/1 success and backoffLimit 10

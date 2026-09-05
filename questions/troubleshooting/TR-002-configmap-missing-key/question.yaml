@@ -1,0 +1,18 @@
+id: TR-002
+title: Fix Pod CreateContainerConfigError on Missing ConfigMap Key
+domain: troubleshooting
+difficulty: easy
+points: 2
+target_context: k3d-cka
+namespace: auth-system
+cluster_scoped: false
+tags:
+- configmap
+- env
+description: |
+  Pod `auth-api` in namespace `auth-system` is stuck in `CreateContainerConfigError` and fails to start.
+
+  1. Investigate the pod events and container definition to identify why the container environment cannot be initialized.
+  2. Update the ConfigMap `auth-config` in namespace `auth-system` to resolve the missing key reference.
+  3. Verify that pod `auth-api` starts successfully and reaches `1/1 Running`.
+grader_hint: Pod auth-api in auth-system is 1/1 Running with valid ConfigMap key

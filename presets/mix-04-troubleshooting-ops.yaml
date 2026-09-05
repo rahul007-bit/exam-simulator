@@ -1,0 +1,21 @@
+name: "Mix Set 04 — Troubleshooting & Operations"
+description: "17 mixed questions (4 easy + 13 medium) focusing on troubleshooting and day-2 operations."
+time_limit_minutes: 120
+questions:
+  - TR-003  # [E] Service selector mismatch
+  - TR-004  # [E] ImagePullBackOff tag typo
+  - TR-010  # [E] Finalizer deadlock removal
+  - TR-021  # [E] Secret base64 decode error
+  - TR-001  # [M] CrashLoopBackOff cmd probe
+  - TR-012  # [M] RBAC 403 secrets permission
+  - TR-013  # [M] Deployment failed rollout rollback
+  - TR-014  # [M] Node cordoned unschedulable
+  - TR-017  # [M] PVC access mode conflict
+  - TR-019  # [M] InitContainer DNS failure
+  - TR-022  # [M] CPU throttling quota
+  - TR-026  # [M] Kubelet config syntax
+  - TR-030  # [M] CronJob concurrency deadlock
+  - TR-032  # [M] SA automountToken disabled
+  - TR-034  # [M] StatefulSet PVC retention
+  - TR-038  # [M] SecurityContext non-root image fix
+  - TR-042  # [M] TopologySpread unsatisfiable

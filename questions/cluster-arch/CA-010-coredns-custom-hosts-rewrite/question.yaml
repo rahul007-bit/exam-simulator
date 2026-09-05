@@ -1,0 +1,19 @@
+id: CA-010
+title: Configure Custom CoreDNS Hosts Rewrite Rule
+domain: cluster-arch
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: kube-system
+cluster_scoped: true
+tags:
+- coredns
+- hosts
+- rewrite
+description: |
+  Configure custom internal DNS resolution in the cluster.
+
+  Create a ConfigMap named `coredns-custom` in namespace `kube-system` containing a static hosts mapping for:
+  - IP: `192.168.1.100`
+  - FQDN: `db.internal.company`
+grader_hint: CoreDNS custom hosts entry maps 192.168.1.100 to db.internal.company

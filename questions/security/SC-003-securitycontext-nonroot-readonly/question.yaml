@@ -1,0 +1,20 @@
+id: SC-003
+title: Enforce Non-Root and Read-Only Root Filesystem SecurityContext
+domain: security
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: sec-apps
+cluster_scoped: false
+tags:
+- securitycontext
+- nonroot
+- hardening
+description: |
+  Create a Pod named `hardened-api` in namespace `sec-apps` with image `nginx:alpine` configured with:
+  - `runAsNonRoot: true`
+  - `runAsUser: 10001`
+  - `readOnlyRootFilesystem: true`
+
+  Mount `emptyDir` volumes at `/var/cache/nginx`, `/var/run`, and `/tmp` so nginx can initialize properly.
+grader_hint: Pod hardened-api in sec-apps runs as non-root user 10001 with readOnlyRootFilesystem

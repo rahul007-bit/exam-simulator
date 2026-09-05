@@ -1,0 +1,17 @@
+id: TR-015
+title: Fix Headless Service Missing ClusterIP None
+domain: troubleshooting
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: db-cluster
+cluster_scoped: false
+tags:
+- statefulset
+- headless
+- dns
+description: |
+  StatefulSet `cassandra-cluster` in namespace `db-cluster` is configured to use service `cassandra-svc` for direct per-pod network discovery, but individual pods are unable to resolve distinct DNS records for their peers.
+
+  Investigate the service configuration of `cassandra-svc` and fix the service so that it functions as a proper headless service for the StatefulSet.
+grader_hint: "Service cassandra-svc has clusterIP None"

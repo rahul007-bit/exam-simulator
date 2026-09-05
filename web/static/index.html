@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kubernetes Exam Simulator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css">
+    <link rel="stylesheet" href="/css/style.css?v=13.0">
+</head>
+<body class="dark-theme">
+
+    <!-- Top App Navigation Header -->
+    <header class="app-header">
+        <div class="header-left">
+            <div class="logo">
+                <span class="logo-icon">K8S</span>
+                <span class="logo-text">SIMULATOR</span>
+            </div>
+            <div class="exam-title-badge" id="examTitle">Loading exam...</div>
+        </div>
+
+        <div class="header-center">
+            <div class="timer-card" id="timerCard">
+                <span class="timer-label">Time remaining:</span>
+                <span class="timer-value" id="timerValue">--:--:--</span>
+            </div>
+        </div>
+
+        <div class="header-right">
+            <button class="btn btn-secondary" id="btnOpenDrawer" style="display:none;">
+                <span id="drawerLabel">Questions (0/0)</span>
+            </button>
+
+            <div class="dropdown" id="workspaceDropdown">
+                <button class="btn btn-secondary dropdown-toggle" id="btnWorkspaceDropdown" type="button" title="Workspace options" onclick="toggleWorkspaceDropdown(event)">
+                    <span>Actions ▾</span>
+                </button>
+                <div class="dropdown-menu" id="workspaceDropdownMenu">
+                    <button class="dropdown-item" type="button" onclick="toggleFullscreen(); closeWorkspaceDropdown();">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+                        <span>Fullscreen</span>
+                    </button>
+                    <button class="dropdown-item" type="button" onclick="reloadWorkspaceFrame(); closeWorkspaceDropdown();">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                        <span>Reload</span>
+                    </button>
+                    <button class="dropdown-item" type="button" onclick="openDesktopInNewTab(); closeWorkspaceDropdown();">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                        <span>New tab</span>
+                    </button>
+                    <button class="dropdown-item" type="button" onclick="copyFromDesktopToHost(); closeWorkspaceDropdown();">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+                        <span>Copy from Desktop</span>
+                    </button>
+                </div>
+            </div>
+
+            <button class="btn btn-flag" id="btnFlagTask" style="display:none;">
+                <span id="flagLabel">Flag</span>
+            </button>
+
+            <button class="btn btn-danger" id="btnSubmitExam" style="display:none;" onclick="onSubmitExam()">
+                <span>Submit exam</span>
+            </button>
+
+            <!-- Admin-only controls -->
+            <button class="btn btn-admin-end" id="btnAdminEndExam" style="display:none;" title="End exam and show results" onclick="adminEndExam()">
+                <span>End exam</span>
+            </button>
+            <button class="btn btn-admin-reset" id="btnAdminResetExam" style="display:none;" title="Clear session and return to start screen" onclick="adminResetExam()">
+                <span>Reset exam</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Workspace Split Container -->
+    <main class="split-container" id="splitContainer">
+
+        <!-- Left Pane: Task Instructions & Controller -->
+        <section class="pane left-pane" id="leftPane">
+            <div class="task-header-bar">
+                <div class="task-title-group">
+                    <span class="task-badge task-num" id="taskNumberBadge">Task 1</span>
+                    <span class="task-badge badge-points" id="taskPointsBadge">3 pts</span>
+                    <span class="task-badge badge-context" id="taskContextBadge">k3d-cka</span>
+                    <span class="task-badge badge-namespace" id="taskNamespaceBadge">ns: default</span>
+                    <span class="flag-indicator" id="taskFlagIndicator" style="display:none;">FLAGGED</span>
+                </div>
+                <h1 class="task-headline" id="taskHeadline">Loading active task...</h1>
+            </div>
+
+            <div class="task-content-scroll" id="taskContentScroll">
+                <div class="markdown-body" id="taskDescription">
+                    <p class="placeholder-text">Select an exam preset or load a task to begin.</p>
+                </div>
+            </div>
+
+            <div class="task-footer-bar">
+                <div class="footer-nav-left">
+                    <button class="btn btn-nav" id="btnPrevTask" disabled>
+                        <span>Previous</span>
+                    </button>
+                    <button class="btn btn-retry" id="btnRetryTask" title="Reset this specific task to initial problem state">
+                        <span>Reset task</span>
+                    </button>
+                </div>
+                <div class="footer-nav-center">
+                    <span class="task-progress-text" id="taskProgressText">Task 1 of 17</span>
+                </div>
+                <div class="footer-nav-right">
+                    <button class="btn btn-nav" id="btnNextTask">
+                        <span>Next</span>
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Right Pane: Terminal / Workspace -->
+        <section class="pane right-pane" id="rightPane">
+            <div class="terminal-tab-bar">
+                <div class="tab-group">
+                    <button class="tab-btn active" id="tabDesktop" onclick="switchWorkspaceTab('desktop')">
+                        <span>Desktop</span>
+                    </button>
+                    <button class="tab-btn" id="tabTerminal" onclick="switchWorkspaceTab('terminal')">
+                        <span>Terminal</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="workspace-viewport">
+                <!-- Desktop noVNC Frame (Default) -->
+                <iframe id="desktopFrame" class="workspace-frame active-frame" src="" allow="clipboard-read *; clipboard-write *; fullscreen *; keyboard-map *" allowfullscreen></iframe>
+                <!-- Built-in Web Terminal -->
+                <div id="terminalContainer" class="workspace-frame"></div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Question Drawer Modal -->
+    <div class="modal-backdrop" id="modalDrawer" style="display:none;">
+        <div class="modal-dialog modal-drawer">
+            <div class="modal-header">
+                <h2>Questions</h2>
+                <button class="modal-close" onclick="closeModal('modalDrawer')">Close</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-subtext">Select a question to jump to it. Flagged questions are highlighted in yellow.</p>
+                <div class="question-grid" id="questionDrawerGrid">
+                    <!-- Dynamic Question Cards -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Exam Start / Preset Modal -->
+    <div class="modal-backdrop" id="modalStart" style="display:none;">
+        <div class="modal-dialog modal-medium">
+            <div class="modal-header">
+                <h2>Select Exam Preset</h2>
+                <button class="modal-close" onclick="closeModal('modalStart')">Close</button>
+            </div>
+            <div class="modal-body">
+                <div class="preset-section">
+                    <h3>Exam presets</h3>
+                    <div class="preset-list" id="presetListContainer">
+                        <!-- Dynamic Presets -->
+                    </div>
+                </div>
+
+                <div class="preset-section">
+                    <h3>Full curriculum</h3>
+                    <div class="preset-card-special" id="cardFullCurriculum" onclick="selectFullCurriculum()">
+                        <div class="preset-card-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                            <div class="preset-special-title" style="margin-bottom: 0;">All 111 questions</div>
+                            <span id="badgeFullCurriculum" class="badge badge-success" style="display:none; font-size: 0.75rem; padding: 2px 8px; border-radius: 12px;">Selected</span>
+                        </div>
+                        <div class="preset-special-desc">Practice all 111 questions in sequential order.</div>
+                        <div class="preset-meta" style="margin-top: 8px; font-size: 0.75rem; color: #a5b4fc; display: flex; gap: 12px;">
+                            <span>⏱ Untimed</span>
+                            <span>📋 111 tasks</span>
+                            <span>🎯 Pass: 66%</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Final Exam Scorecard Modal -->
+    <div class="modal-backdrop" id="modalScorecard" style="display:none;">
+        <div class="modal-dialog modal-large">
+            <div class="modal-header">
+                <h2>Exam results</h2>
+                <button class="modal-close" onclick="closeModal('modalScorecard')">Close</button>
+            </div>
+            <div class="modal-body">
+                <div class="score-summary-banner" id="scoreSummaryBanner">
+                    <div class="score-percentage" id="scorePercentage">0%</div>
+                    <div class="score-details">
+                        <div class="score-status" id="scoreStatusBadge">PENDING</div>
+                        <div class="score-breakdown" id="scoreBreakdownText">0 / 0 points earned</div>
+                    </div>
+                </div>
+
+                <div class="scorecard-table-container">
+                    <table class="scorecard-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>ID</th>
+                                <th>Task title</th>
+                                <th>Domain</th>
+                                <th>Context</th>
+                                <th>Score</th>
+                                <th>Status</th>
+                                <th>Diagnostics</th>
+                            </tr>
+                        </thead>
+                        <tbody id="scorecardTableBody">
+                            <!-- Dynamic Scorecard Rows -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('modalScorecard')">Close</button>
+                <button class="btn btn-primary" onclick="openStartModal()">Start new exam</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Global Loading & Action HUD Overlay -->
+    <div class="global-loading-overlay" id="globalLoadingOverlay">
+        <div class="loading-card">
+            <div class="loading-spinner"></div>
+            <div class="loading-title" id="loadingTitle">Processing...</div>
+            <div class="loading-desc" id="loadingDesc">Please wait while the environment updates.</div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/split.js/1.6.5/split.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.1/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
+    <script src="/js/app.js?v=29.0"></script>
+</body>
+</html>

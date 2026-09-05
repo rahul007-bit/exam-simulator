@@ -1,0 +1,18 @@
+id: TR-036
+title: Fix ExternalName Service FQDN Typo
+domain: troubleshooting
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: external-routing
+cluster_scoped: false
+tags:
+- services
+- externalname
+description: |
+  Applications in namespace `external-routing` are failing to reach the external database via Service `db-external` due to an invalid target address.
+
+  The database administrator confirmed that the correct endpoint is `db.prod.internal.corp`.
+
+  Investigate Service `db-external` in namespace `external-routing`, update its external target to `db.prod.internal.corp`, and ensure the service remains operational as type `ExternalName`.
+grader_hint: Service db-external has valid FQDN db.prod.internal.corp

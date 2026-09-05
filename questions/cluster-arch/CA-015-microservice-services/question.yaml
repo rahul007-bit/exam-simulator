@@ -1,0 +1,26 @@
+id: CA-015
+title: Deploy Microservice ClusterIP Backends
+domain: cluster-arch
+difficulty: easy
+points: 2
+target_context: k3d-cka
+namespace: gateway-mesh
+cluster_scoped: false
+breaking: false
+preserve_state: true
+tags:
+- networking
+- service
+- deployment
+description: 'In namespace gateway-mesh:
+
+  1. Create Deployment auth-svc-backend (2 replicas, image: nginx:latest, containerPort:
+  80, label: app: auth-svc).
+
+  2. Create Service auth-svc (ClusterIP, port 80 -> targetPort 80, selector app: auth-svc).
+
+  3. Create Deployment order-svc-backend (2 replicas, image: nginx:latest, containerPort:
+  80, label: app: order-svc).
+
+  4. Create Service order-svc (ClusterIP, port 80 -> targetPort 80, selector app:
+  order-svc).'

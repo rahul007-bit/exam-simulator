@@ -1,0 +1,16 @@
+id: WL-010
+title: Configure Liveness, Readiness, and Startup Probes
+domain: workloads
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: health-monitoring
+cluster_scoped: false
+tags:
+- probes
+- liveness
+- readiness
+description: Create Pod `health-app` in `health-monitoring` with startupProbe (period 5s,
+  failureThreshold 10), readinessProbe (httpGet /ready), and livenessProbe (httpGet
+  /health).
+grader_hint: Pod health-app has all 3 probes configured

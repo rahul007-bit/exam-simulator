@@ -1,0 +1,18 @@
+id: TR-012
+title: Fix RBAC Permission Denied (403) for Application ServiceAccount
+domain: troubleshooting
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: fintech
+cluster_scoped: false
+tags:
+- rbac
+- serviceaccount
+- 403
+description: |
+  An application pod in namespace `fintech` runs under ServiceAccount `vault-reader` and fails with HTTP `403 Forbidden` when attempting to access secrets.
+
+  Investigate the RBAC configuration in namespace `fintech`.
+  Configure RBAC permissions so that ServiceAccount `vault-reader` has permission to `get` and `list` resources of type `secrets` within namespace `fintech`.
+grader_hint: ServiceAccount vault-reader can get secrets in namespace fintech

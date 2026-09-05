@@ -1,0 +1,16 @@
+id: TR-C05
+title: 'Chaos: Re-bootstrap Kubelet with New Token After Cert Expiration'
+domain: troubleshooting
+difficulty: crazy
+points: 6
+target_context: kubeadm-vms
+namespace: default
+cluster_scoped: true
+tags:
+- crazy
+- kubelet
+- bootstrap
+- tls
+description: Worker node kubelet client certificates expired and bootstrap token revoked.
+  Generate new token with kubeadm and re-join worker node.
+grader_hint: Worker node is Ready

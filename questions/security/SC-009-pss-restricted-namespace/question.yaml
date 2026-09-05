@@ -1,0 +1,15 @@
+id: SC-009
+title: Enforce Pod Security Standards (PSS) Restricted Mode
+domain: security
+difficulty: hard
+points: 4
+target_context: k3d-cka
+namespace: secure-zone
+cluster_scoped: true
+tags:
+- pss
+- labels
+- admission
+description: 'Enforce Pod Security Standards `restricted` mode on namespace `secure-zone`
+  using label `pod-security.kubernetes.io/enforce: restricted`.'
+grader_hint: Namespace has PSS restricted enforcement label

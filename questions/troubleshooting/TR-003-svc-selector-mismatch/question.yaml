@@ -1,0 +1,17 @@
+id: TR-003
+title: Fix Empty Endpoints on Cart Service
+domain: troubleshooting
+difficulty: easy
+points: 2
+target_context: k3d-cka
+namespace: ecommerce
+cluster_scoped: false
+tags:
+- services
+- networking
+- endpoints
+description: 'Service cart-svc in namespace ecommerce has no active endpoints even
+  though the backend Deployment cart-backend has running pods.
+
+  Fix the Service selector so traffic routes to the backend pods on port 80.'
+grader_hint: Endpoints cart-svc in ecommerce has at least 1 active IP endpoint.

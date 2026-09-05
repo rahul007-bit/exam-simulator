@@ -1,0 +1,19 @@
+id: SC-002
+title: Create ClusterRole and Binding for Read-Only Cluster Auditor
+domain: security
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: default
+cluster_scoped: true
+tags:
+- rbac
+- clusterrole
+- audit
+description: |
+  A compliance auditor requires cluster-wide read-only access.
+
+  Create a ClusterRole named `cluster-auditor` that grants `get`, `list`, and `watch` permissions on `pods`, `nodes`, and `services`.
+
+  Bind this ClusterRole to the user `auditor-user` using a ClusterRoleBinding named `cluster-auditor-binding`.
+grader_hint: ClusterRole and ClusterRoleBinding configured for auditor-user

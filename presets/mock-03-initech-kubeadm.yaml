@@ -1,0 +1,21 @@
+name: "Mock Exam 03 — Initech Migration (kubeadm Focus)"
+description: "Host-level and cluster administration mock exam covering etcd, kubeadm upgrades, and cert renewals."
+time_limit_minutes: 120
+questions:
+  - CA-001  # [M] etcd snapshot backup
+  - CA-002  # [H] etcd snapshot restore
+  - CA-003  # [H] kubeadm controlplane upgrade
+  - CA-004  # [M] kubeadm worker upgrade
+  - CA-005  # [M] Safely drain worker node
+  - CA-006  # [M] Kubeadm token join
+  - CA-011  # [M] Kubeadm cert renewal
+  - CA-012  # [H] Controlplane static pod
+  - TR-033  # [H] Static pod manifest typo
+  - TR-035  # [H] Cgroup driver systemd mismatch
+  - TR-039  # [H] etcd WAL disk lock
+  - SC-002  # [M] ClusterRole auditor
+  - SC-008  # [M] Revoke overprivileged clusteradmin
+  - ST-005  # [E] PV nodeAffinity local
+  - ST-007  # [H] Recover released PV
+  - WL-006  # [M] DaemonSet on worker nodes
+  - WL-011  # [M] PodDisruptionBudget minAvailable

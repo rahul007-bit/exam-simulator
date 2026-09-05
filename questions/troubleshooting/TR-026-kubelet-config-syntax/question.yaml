@@ -1,0 +1,14 @@
+id: TR-026
+title: Fix Kubelet Service Configuration Error on Node
+domain: troubleshooting
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: node-diagnostics
+cluster_scoped: false
+tags:
+- kubelet
+- systemd
+description: Kubelet configuration on node contains syntax error. Identify and fix
+  config.
+grader_hint: Kubelet service is active

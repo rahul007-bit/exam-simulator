@@ -1,0 +1,14 @@
+id: SC-005
+title: Create TLS Secret and Mount into Nginx Pod
+domain: security
+difficulty: easy
+points: 2
+target_context: k3d-cka
+namespace: secure-ingress
+cluster_scoped: false
+tags:
+- secrets
+- tls
+description: In namespace `secure-ingress`, create a TLS secret `app-tls-secret` (cert/key)
+  and mount into pod `tls-web` at `/etc/tls`.
+grader_hint: Pod tls-web mounts secret at /etc/tls

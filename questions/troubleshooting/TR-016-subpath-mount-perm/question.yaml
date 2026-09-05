@@ -1,0 +1,15 @@
+id: TR-016
+title: Fix Non-Root SubPath Volume Permission Denied
+domain: troubleshooting
+difficulty: hard
+points: 4
+target_context: k3d-cka
+namespace: api-backend
+cluster_scoped: false
+tags:
+- volumes
+- subpath
+- securitycontext
+description: Pod `api-app` in `api-backend` crashes because non-root user cannot write
+  to volume subPath `/data/cache`. Fix permissions or volume mounts.
+grader_hint: Pod api-app is 1/1 Running

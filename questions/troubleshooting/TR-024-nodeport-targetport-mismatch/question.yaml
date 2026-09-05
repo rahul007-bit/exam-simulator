@@ -1,0 +1,14 @@
+id: TR-024
+title: Fix NodePort TargetPort Container Routing
+domain: troubleshooting
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: web-services
+cluster_scoped: false
+tags:
+- services
+- nodeport
+description: NodePort Service `web-np` in `web-services` forwards traffic to wrong
+  port `9090` instead of containerPort `80`.
+grader_hint: 'Service web-np has targetPort: 80'

@@ -1,0 +1,22 @@
+id: CA-013
+title: Extract Pod CIDR and Service CIDR from Cluster
+domain: cluster-arch
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: default
+cluster_scoped: true
+tags:
+- cluster-info
+- cidr
+description: |
+  Inspect the network configuration of the `k3d-cka` cluster to determine the Pod CIDR and the Service CIDR.
+
+  Save your findings to `/tmp/cluster-network.json` as a JSON object containing keys `podCIDR` and `serviceCIDR`. Example:
+  ```json
+  {
+    "podCIDR": "10.42.0.0/16",
+    "serviceCIDR": "10.43.0.0/16"
+  }
+  ```
+grader_hint: File /tmp/cluster-network.json contains podCIDR and serviceCIDR

@@ -1,0 +1,19 @@
+id: CA-001
+title: Perform etcd Snapshot Backup
+domain: cluster-arch
+difficulty: medium
+points: 3
+target_context: kubeadm-vms
+namespace: default
+cluster_scoped: true
+tags:
+- etcd
+- backup
+- snapshot
+description: |
+  A cluster administrator requires a manual etcd snapshot backup before proceeding with maintenance on the `kubeadm-vms` cluster.
+
+  1. Connect to the control plane node `node1` (`ssh node1`).
+  2. Take a snapshot of the running etcd instance using `etcdctl`.
+  3. Save the snapshot file to `/opt/backup/etcd-snapshot.db`.
+grader_hint: Valid etcd snapshot exists at /opt/backup/etcd-snapshot.db on node1

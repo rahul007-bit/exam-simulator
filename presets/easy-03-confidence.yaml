@@ -1,0 +1,21 @@
+name: "Easy Set 03 — Confidence Builder"
+description: "17 easy questions: third practice run to build speed and confidence."
+time_limit_minutes: 120
+questions:
+  - ST-001  # [E] Local PV & PVC binding
+  - ST-005  # [E] PV node affinity local
+  - ST-009  # [E] Projected volume aggregation
+  - SC-001  # [E] RBAC deployer SA
+  - SC-005  # [E] TLS secret creation & mount
+  - SC-010  # [E] Scoped SA role
+  - WL-002  # [E] InitContainer DB gate
+  - WL-007  # [E] CronJob schedule & history
+  - WL-009  # [E] Batch job parallelism
+  - TR-002  # [E] ConfigMap missing key
+  - TR-003  # [E] Service selector mismatch
+  - TR-004  # [E] ImagePullBackOff tag typo
+  - TR-010  # [E] Finalizer deadlock removal
+  - TR-021  # [E] Secret base64 decode error
+  - CA-007  # [E] Ingress path routing
+  - CA-009  # [E] NodePort service config
+  - CA-015  # [E] Microservice services

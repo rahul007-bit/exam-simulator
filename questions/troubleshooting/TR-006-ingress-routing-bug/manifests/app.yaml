@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-deploy
+  namespace: gateway-ns
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: orders
+  template:
+    metadata:
+      labels:
+        app: orders
+    spec:
+      containers:
+      - name: app
+        image: nginx:alpine
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders-svc
+  namespace: gateway-ns
+spec:
+  selector:
+    app: orders
+  ports:
+  - port: 80
+    targetPort: 80
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: users-deploy
+  namespace: gateway-ns
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: users
+  template:
+    metadata:
+      labels:
+        app: users
+    spec:
+      containers:
+      - name: app
+        image: nginx:alpine
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: users-svc
+  namespace: gateway-ns
+spec:
+  selector:
+    app: users
+  ports:
+  - port: 80
+    targetPort: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api-gateway
+  namespace: gateway-ns
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /orders
+        pathType: Prefix
+        backend:
+          service:
+            name: wrong-orders-service
+            port:
+              number: 8080
+      - path: /users
+        pathType: Prefix
+        backend:
+          service:
+            name: wrong-users-service
+            port:
+              number: 9000

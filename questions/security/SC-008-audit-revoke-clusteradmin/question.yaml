@@ -1,0 +1,17 @@
+id: SC-008
+title: Audit and Revoke Overprivileged ClusterRoleBindings
+domain: security
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: default
+cluster_scoped: true
+tags:
+- security
+- audit
+- rbac
+description: |
+  A recent security audit reported that an unauthorized or overprivileged ClusterRoleBinding exists granting the `cluster-admin` ClusterRole to user `dev-operator`.
+
+  Audit the existing ClusterRoleBindings in the cluster, identify the overprivileged binding granting `cluster-admin` to user `dev-operator`, and delete it.
+grader_hint: Overprivileged ClusterRoleBinding dev-ops-binding is deleted

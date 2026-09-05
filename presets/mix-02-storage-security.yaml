@@ -1,0 +1,21 @@
+name: "Mix Set 02 — Storage & Security"
+description: "17 mixed questions (4 easy + 13 medium) focusing on storage, RBAC, and security contexts."
+time_limit_minutes: 120
+questions:
+  - SC-001  # [E] RBAC deployer SA
+  - SC-005  # [E] TLS secret creation & mount
+  - ST-001  # [E] Local PV & PVC binding
+  - ST-009  # [E] Projected volume aggregation
+  - SC-002  # [M] ClusterRole & ClusterRoleBinding auditor
+  - SC-003  # [M] SecurityContext non-root readonly
+  - SC-004  # [M] SecurityContext drop capabilities
+  - SC-006  # [M] RBAC resourceNames restriction
+  - SC-008  # [M] Audit & revoke cluster-admin
+  - SC-012  # [M] Hardened pod security
+  - ST-002  # [M] Dynamic StorageClass retain
+  - ST-003  # [M] PVC expansion online
+  - ST-006  # [M] StatefulSet VolumeClaimTemplates
+  - ST-008  # [M] Mount secret & ConfigMap volumes
+  - ST-010  # [M] ReadWriteOncePod access mode
+  - ST-012  # [M] Pipeline storage
+  - TR-007  # [M] PVC pending SC mismatch

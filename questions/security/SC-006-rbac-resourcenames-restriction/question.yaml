@@ -1,0 +1,16 @@
+id: SC-006
+title: Restrict Secret Access Using RBAC resourceNames
+domain: security
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: rbac-fine-grained
+cluster_scoped: false
+tags:
+- rbac
+- resourcenames
+description: |
+  In namespace `rbac-fine-grained`, multiple secrets exist including `allowed-creds`.
+
+  Create a Role named `vault-restricted` that grants `get` permission ONLY on the Secret named `allowed-creds`, using the `resourceNames` constraint.
+grader_hint: Role restricts get to allowed-creds only

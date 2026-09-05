@@ -1,0 +1,18 @@
+name: "Medium Exam 04 — Full Curriculum"
+description: "14-question CKA practice exam matching the official CNCF domain blueprint (Troubleshooting, Cluster Arch, Services/Security, Workloads, Storage)."
+time_limit_minutes: 120
+questions:
+  - CA-012  # [CA] Static pod health monitor
+  - CA-014  # [CA] Add missing IP SAN to API server
+  - CA-C01  # [CA] Recover etcd from quorum loss
+  - SC-005  # [Sec] TLS secret mount in pod
+  - SC-007  # [Sec] Projected token audience
+  - SC-013  # [Sec] Scoped ConfigMap and Secret RBAC
+  - WL-007  # [WL] CronJob history limits
+  - WL-013  # [WL] Pod preStop hook
+  - ST-001  # [ST] PV/PVC binding
+  - ST-012  # [ST] Pipeline storage
+  - TR-026  # [TR] Kubelet service config error
+  - TR-028  # [TR] HPA missing CPU requests
+  - TR-030  # [TR] CronJob concurrency deadlock
+  - TR-032  # [TR] AutomountServiceAccountToken

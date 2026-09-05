@@ -1,0 +1,14 @@
+id: WL-009
+title: Create Batch Job with Parallelism and Completions
+domain: workloads
+difficulty: easy
+points: 2
+target_context: k3d-cka
+namespace: batch-processing
+cluster_scoped: false
+tags:
+- jobs
+- batch
+description: 'Create Job `batch-processor` in `batch-processing` with `completions: 5`, `parallelism:
+  2`, and `backoffLimit: 4`.'
+grader_hint: Job batch-processor has completions 5 and parallelism 2

@@ -1,0 +1,18 @@
+id: TR-013
+title: Roll Back Broken Deployment Rollout to Previous Working Revision
+domain: troubleshooting
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: shipping
+cluster_scoped: false
+tags:
+- deployment
+- rollout
+- undo
+- rollback
+description: |
+  A recent update to Deployment `delivery-service` in namespace `shipping` failed, leaving the rollout stalled and pods failing to run.
+
+  Investigate the rollout history of `delivery-service` and roll back the deployment to the previous working revision so that all 2 replicas become healthy and Ready.
+grader_hint: Deployment delivery-service in shipping is rolled back and has 2/2 ready pods

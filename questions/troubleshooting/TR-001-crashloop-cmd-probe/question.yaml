@@ -1,0 +1,17 @@
+id: TR-001
+title: Fix CrashLoopBackOff on Checkout Service
+domain: troubleshooting
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: checkout-prod
+cluster_scoped: false
+tags:
+- pods
+- probes
+- arguments
+description: 'Pod checkout-api in namespace checkout-prod is failing with CrashLoopBackOff.
+
+  Diagnose the failure from logs and pod events, fix the deployment configuration,
+  and ensure the pod achieves 1/1 Running and passes readiness probes.'
+grader_hint: Deployment checkout-api in checkout-prod has 1/1 ready pods without crashing.

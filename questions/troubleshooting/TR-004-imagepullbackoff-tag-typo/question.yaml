@@ -1,0 +1,17 @@
+id: TR-004
+title: Fix Deployment ImagePullBackOff due to Invalid Tag
+domain: troubleshooting
+difficulty: easy
+points: 2
+target_context: k3d-cka
+namespace: warehouse
+cluster_scoped: false
+tags:
+- deployment
+- images
+- troubleshooting
+description: 'Deployment `inventory-svc` in namespace `warehouse` is failing with
+  `ImagePullBackOff` due to a mistyped image tag.
+
+  Fix the deployment image to use `nginx:1.25.4-alpine` so all replicas start successfully.'
+grader_hint: Deployment inventory-svc in warehouse has 2/2 ready pods.

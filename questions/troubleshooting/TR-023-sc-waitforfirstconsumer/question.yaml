@@ -1,0 +1,14 @@
+id: TR-023
+title: Add WaitForFirstConsumer to Local StorageClass
+domain: troubleshooting
+difficulty: hard
+points: 4
+target_context: k3d-cka
+namespace: data-nodes
+cluster_scoped: true
+tags:
+- storageclass
+- volumebindingmode
+description: 'Local PV cannot bind to PVC because StorageClass lacks `volumeBindingMode:
+  WaitForFirstConsumer`. Update StorageClass.'
+grader_hint: PVC in data-nodes is Bound

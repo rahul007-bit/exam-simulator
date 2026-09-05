@@ -1,0 +1,16 @@
+id: TR-034
+title: Update StatefulSet PVC Retention Policy
+domain: troubleshooting
+difficulty: medium
+points: 3
+target_context: k3d-cka
+namespace: stateful-db
+cluster_scoped: false
+tags:
+- statefulset
+- storage
+description: |
+  The StatefulSet `cache-node` in namespace `stateful-db` currently retains its PersistentVolumeClaims when deleted, leading to orphaned volumes.
+
+  Update the StatefulSet `cache-node` so that its PersistentVolumeClaims are automatically deleted whenever the StatefulSet is deleted. Ensure all replicas of `cache-node` remain healthy and Ready.
+grader_hint: StatefulSet cache-node has whenDeleted Delete retention policy
