@@ -21,11 +21,24 @@ class LabDeployer:
         self.sets_dir.mkdir(parents=True, exist_ok=True)
 
     def load_active_session(self, loader: QuestionLoader) -> Optional[ExamSession]:
-        if not self.session_file.exists():
-            return None
+        data = None
         try:
-            with open(self.session_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            from core.redis_bus import bus as redis_bus
+            data = redis_bus.get_session_state()
+        except Exception:
+            data = None
+
+        if data is None:
+            if not self.session_file.exists():
+                return None
+            try:
+                with open(self.session_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception as e:
+                print(f"[Warning] Failed to parse active session: {e}")
+                return None
+
+        try:
             q_ids = data.get("question_ids", [])
             questions = [loader.get(qid) for qid in q_ids if loader.get(qid) is not None]
             return ExamSession(
@@ -46,8 +59,14 @@ class LabDeployer:
             return None
 
     def save_session(self, session: ExamSession) -> None:
+        data = session.to_dict()
+        try:
+            from core.redis_bus import bus as redis_bus
+            redis_bus.set_session_state(session.session_id, data)
+        except Exception:
+            pass
         with open(self.session_file, "w", encoding="utf-8") as f:
-            json.dump(session.to_dict(), f, indent=2)
+            json.dump(data, f, indent=2)
 
     def export_tasks_markdown(self, session: ExamSession) -> Path:
         """Exports the active exam questions as a clean Markdown task sheet in sets/."""
@@ -120,6 +139,11 @@ class LabDeployer:
         return md_file
 
     def clear_session(self, cleanup_cluster: bool = True) -> None:
+        try:
+            from core.redis_bus import bus as redis_bus
+            redis_bus.clear_session_state()
+        except Exception:
+            pass
         if self.session_file.exists():
             try:
                 recorder.log_event("SESSION_RESET", {"cleanup_cluster": cleanup_cluster})
@@ -414,7 +438,7 @@ class LabDeployer:
         self.deploy_step(session, 0)
         return session
 
-    def deploy_step(self, session: ExamSession, index: int, force_setup: bool = False) -> bool:
+    def deploy_step(self, session: ExamSession, index: int, force_setup: bool = False, progress_cb: Optional[Any] = None) -> bool:
         if index < 0 or index >= len(session.questions):
             print(f"[Error] Task index {index + 1} out of range (1 to {len(session.questions)}).")
             return False
@@ -434,6 +458,9 @@ class LabDeployer:
                 leaving_q.id in flagged_list
                 or getattr(leaving_q, "is_flagged", False)
             )
+
+            if progress_cb:
+                progress_cb("grading", f"Evaluating Task {session.current_index + 1}", 1, 3, f"Evaluating rubric for {leaving_q.title}...")
 
             if is_leaving_flagged:
                 # Do not grade flagged task when switching between tasks
@@ -483,6 +510,9 @@ class LabDeployer:
         session.current_index = index
         q = session.questions[index]
 
+        if progress_cb:
+            progress_cb("cleanup", "Preparing Cluster Environment", 2, 3, "Cleaning ephemeral namespaces and cluster states...")
+
         # Fast cleanup: Only clean leaving task's specific namespace instead of scanning whole cluster.
         # Preserve namespace for flagged tasks so they can be reviewed and graded upon final exam submission!
         if leaving_q and not is_leaving_flagged and leaving_q.namespace and leaving_q.namespace not in SYSTEM_NAMESPACES and leaving_q.namespace != q.namespace:
@@ -530,6 +560,9 @@ class LabDeployer:
                 subprocess.run(["kubectl", "--context", kubeadm_ctx, "uncordon", os.getenv("NODE_2", "node2"), os.getenv("NODE_3", "node3")], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
             except Exception:
                 pass
+
+        if progress_cb:
+            progress_cb("deploying", f"Deploying Task {index + 1}", 3, 3, f"Applying manifests for {q.title}...")
 
         print(f"\n[Deployer] Deploying Task {index + 1}/{len(session.questions)}: {q.id} ({q.title})...", end="", flush=True)
 
@@ -594,6 +627,9 @@ class LabDeployer:
             pass
         else:
             print(" [READY]")
+
+        if progress_cb:
+            progress_cb("ready", f"Task {index + 1} Ready", 3, 3, "Ready for candidate input.")
 
         self.save_session(session)
         self.export_tasks_markdown(session)

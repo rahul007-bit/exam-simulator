@@ -1171,6 +1171,83 @@ body.dark-theme {
     line-height: 1.5;
 }
 
+.loading-progress-container {
+    width: 100%;
+    margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.loading-progress-bar {
+    width: 100%;
+    height: 6px;
+    background: rgba(30, 41, 59, 0.9);
+    border-radius: 9999px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.loading-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #0284c7, #38bdf8, #60a5fa);
+    border-radius: 9999px;
+    transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.loading-steps-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    padding: 0 4px;
+}
+
+.loading-step-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.75rem;
+    color: #64748b;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    transition: all 0.2s ease;
+}
+
+.loading-step-item .step-num {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #1e293b;
+    color: #94a3b8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.68rem;
+    font-weight: 700;
+    transition: all 0.2s ease;
+}
+
+.loading-step-item.active {
+    color: #38bdf8;
+}
+
+.loading-step-item.active .step-num {
+    background: #0284c7;
+    color: #ffffff;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.6);
+}
+
+.loading-step-item.done {
+    color: #4ade80;
+}
+
+.loading-step-item.done .step-num {
+    background: #16a34a;
+    color: #ffffff;
+}
+
 /* ── Clipboard Sync Floating Toast ─────────────────────────────────────── */
 
 .clipboard-sync-toast {

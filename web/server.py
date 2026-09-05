@@ -342,6 +342,23 @@ def get_clipboard_endpoint():
         return {"text": "", "error": str(e)}
 
 
+def _make_progress_cb(session_id: str):
+    def cb(stage: str, title: str, step: int, total_steps: int, desc: str = ""):
+        try:
+            redis_bus.publish_session_event(session_id, {
+                "type": "transition_progress",
+                "stage": stage,
+                "title": title,
+                "desc": desc,
+                "step": step,
+                "total_steps": total_steps,
+                "percent": int((step / total_steps) * 100),
+            })
+        except Exception:
+            pass
+    return cb
+
+
 @app.post("/api/action/next")
 def action_next(request: Request):
     session = deployer.load_active_session(loader)
@@ -352,7 +369,7 @@ def action_next(request: Request):
     if next_idx >= len(session.questions):
         raise HTTPException(status_code=400, detail="Already at the final task")
 
-    deployer.deploy_step(session, next_idx)
+    deployer.deploy_step(session, next_idx, progress_cb=_make_progress_cb(session.session_id))
     return get_session(request)
 
 
@@ -366,7 +383,7 @@ def action_prev(request: Request):
     if prev_idx < 0:
         raise HTTPException(status_code=400, detail="Already at the first task")
 
-    deployer.deploy_step(session, prev_idx)
+    deployer.deploy_step(session, prev_idx, progress_cb=_make_progress_cb(session.session_id))
     return get_session(request)
 
 
@@ -380,7 +397,7 @@ def action_jump(req: JumpRequest, request: Request):
     if target_idx < 0 or target_idx >= len(session.questions):
         raise HTTPException(status_code=400, detail=f"Task number {req.task_num} out of range")
 
-    deployer.deploy_step(session, target_idx)
+    deployer.deploy_step(session, target_idx, progress_cb=_make_progress_cb(session.session_id))
     return get_session(request)
 
 
@@ -434,7 +451,7 @@ def action_retry():
     except Exception:
         pass
     # Re-run deploy step for current index with forced setup reset
-    deployer.deploy_step(session, cur_idx, force_setup=True)
+    deployer.deploy_step(session, cur_idx, force_setup=True, progress_cb=_make_progress_cb(session.session_id))
     return {"status": "ok", "message": f"Task {cur_idx + 1} re-initialized"}
 
 
@@ -714,12 +731,21 @@ async def terminal_websocket(websocket: WebSocket):
     await websocket.accept()
 
     session = deployer.load_active_session(loader)
+    sid = session.session_id if session else "default"
     if session:
         try:
             recorder.attach_or_resume(session.session_id, session.name)
             recorder.log_event("TERMINAL_ATTACH", {"session_id": session.session_id})
         except Exception:
             pass
+
+    # Instant scrollback replay from Redis buffer upon connect/reconnect
+    try:
+        buffered_chunks = redis_bus.get_terminal_buffer(sid)
+        for chunk in buffered_chunks:
+            await websocket.send_bytes(chunk)
+    except Exception:
+        pass
 
     env = os.environ.copy()
     env["TERM"] = "xterm-256color"
@@ -785,6 +811,10 @@ async def terminal_websocket(websocket: WebSocket):
                             break
                         try:
                             recorder.record_output(data)
+                        except Exception:
+                            pass
+                        try:
+                            redis_bus.append_terminal_buffer(sid, data)
                         except Exception:
                             pass
                         await websocket.send_bytes(data)

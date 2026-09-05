@@ -23,6 +23,7 @@ class RedisBus:
         self.port = port
         self.db = db
         self._sync_client: Optional[redis.Redis] = None
+        self._bytes_client: Optional[redis.Redis] = None
         self._async_client: Optional[aioredis.Redis] = None
         self._is_connected = False
 
@@ -37,7 +38,7 @@ class RedisBus:
             return False
 
     def get_sync_client(self) -> redis.Redis:
-        """Returns synchronous Redis client."""
+        """Returns synchronous Redis client with string decoding."""
         if self._sync_client is None:
             self._sync_client = redis.Redis(
                 host=self.host,
@@ -48,6 +49,19 @@ class RedisBus:
                 decode_responses=True,
             )
         return self._sync_client
+
+    def get_bytes_client(self) -> redis.Redis:
+        """Returns synchronous Redis client for raw binary data (e.g. terminal pty stream)."""
+        if self._bytes_client is None:
+            self._bytes_client = redis.Redis(
+                host=self.host,
+                port=self.port,
+                db=self.db,
+                socket_timeout=2,
+                socket_connect_timeout=2,
+                decode_responses=False,
+            )
+        return self._bytes_client
 
     def get_async_client(self) -> aioredis.Redis:
         """Returns asynchronous Redis client for FastAPI WebSockets."""
@@ -178,6 +192,87 @@ class RedisBus:
             client.hset(f"session:{session_id}", "status", "completed")
             client.expire(f"session:{session_id}", 86400)
             self.publish_session_event(session_id, {"type": "session_terminated", "session_id": session_id})
+        except Exception:
+            pass
+
+    # --- Terminal Output Buffer (Scrollback Replay on Reconnect) ---
+
+    def append_terminal_buffer(self, session_id: str, data: bytes, max_chunks: int = 200) -> None:
+        """Appends output chunk to session terminal ring buffer."""
+        if not self.is_available() or not data:
+            return
+        try:
+            client = self.get_bytes_client()
+            key = f"terminal:buffer:{session_id}"
+            client.rpush(key, data)
+            client.ltrim(key, -max_chunks, -1)
+            client.expire(key, 7200)
+        except Exception:
+            pass
+
+    def get_terminal_buffer(self, session_id: str) -> list[bytes]:
+        """Retrieves terminal scrollback buffer for session reconnect."""
+        if not self.is_available():
+            return []
+        try:
+            client = self.get_bytes_client()
+            key = f"terminal:buffer:{session_id}"
+            return client.lrange(key, 0, -1) or []
+        except Exception:
+            return []
+
+    def clear_terminal_buffer(self, session_id: str) -> None:
+        """Clears terminal buffer for session."""
+        if not self.is_available():
+            return
+        try:
+            client = self.get_sync_client()
+            client.delete(f"terminal:buffer:{session_id}")
+        except Exception:
+            pass
+
+    # --- In-Memory Session State Storage ---
+
+    def set_session_state(self, session_id: str, state_dict: Dict[str, Any]) -> bool:
+        """Stores active session state in Redis."""
+        if not self.is_available():
+            return False
+        try:
+            client = self.get_sync_client()
+            client.set(f"session:{session_id}", json.dumps(state_dict), ex=86400)
+            client.set("session:active:id", session_id, ex=86400)
+            return True
+        except Exception:
+            return False
+
+    def get_session_state(self, session_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Retrieves session state from Redis."""
+        if not self.is_available():
+            return None
+        try:
+            client = self.get_sync_client()
+            sid = session_id or client.get("session:active:id")
+            if not sid:
+                return None
+            raw = client.get(f"session:{sid}")
+            if raw:
+                return json.loads(raw)
+            return None
+        except Exception:
+            return None
+
+    def clear_session_state(self, session_id: Optional[str] = None) -> None:
+        """Clears session state and terminal buffer from Redis."""
+        if not self.is_available():
+            return
+        try:
+            client = self.get_sync_client()
+            sid = session_id or client.get("session:active:id")
+            if sid:
+                client.delete(f"session:{sid}")
+                client.delete(f"clipboard:{sid}")
+                client.delete(f"terminal:buffer:{sid}")
+            client.delete("session:active:id")
         except Exception:
             pass
 
