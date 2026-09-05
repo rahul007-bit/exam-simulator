@@ -98,9 +98,14 @@ class DeskAgent:
     def start_inbound_clipboard_listener(self):
         def _listen():
             pubsub = self.r.pubsub()
-            channel = f"clipboard:{self.session_id}"
-            pubsub.subscribe(channel)
-            print(f"[DeskAgent] Subscribed to Redis channel '{channel}' for inbound clipboard.")
+            channels = [
+                f"clipboard:{self.session_id}",
+                "clipboard:active",
+                f"session:{self.session_id}",
+                "session:active",
+            ]
+            pubsub.subscribe(*channels)
+            print(f"[DeskAgent] Subscribed to Redis channels {channels} for inbound clipboard.")
 
             while self.running:
                 try:
@@ -112,6 +117,8 @@ class DeskAgent:
                             parsed = json.loads(raw_data)
                             if parsed.get("source") == "desktop":
                                 # Ignore our own echoes
+                                continue
+                            if parsed.get("type") == "clipboard_sync" and parsed.get("source") == "desktop":
                                 continue
                             text_to_set = parsed.get("text", "")
                         except Exception:

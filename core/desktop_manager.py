@@ -69,9 +69,22 @@ class DesktopManager:
         if not kube_text:
             return
 
-        # Rewrite 0.0.0.0 and 127.0.0.1 cluster URLs to host gateway IP
-        kube_text = kube_text.replace("https://0.0.0.0:", f"https://{redis_host}:")
-        kube_text = kube_text.replace("https://127.0.0.1:", f"https://{redis_host}:")
+        # Rewrite 0.0.0.0 and 127.0.0.1 cluster URLs to host gateway IP with TLS skip
+        try:
+            import yaml
+            doc = yaml.safe_load(kube_text)
+            if isinstance(doc, dict):
+                for cluster in doc.get("clusters", []):
+                    c_info = cluster.get("cluster", {})
+                    srv = c_info.get("server", "")
+                    if "0.0.0.0" in srv or "127.0.0.1" in srv:
+                        c_info["server"] = srv.replace("0.0.0.0", redis_host).replace("127.0.0.1", redis_host)
+                        c_info.pop("certificate-authority-data", None)
+                        c_info["insecure-skip-tls-verify"] = True
+                kube_text = yaml.safe_dump(doc, sort_keys=False)
+        except Exception:
+            kube_text = kube_text.replace("https://0.0.0.0:", f"https://{redis_host}:")
+            kube_text = kube_text.replace("https://127.0.0.1:", f"https://{redis_host}:")
 
         try:
             client = redis_bus.get_sync_client()

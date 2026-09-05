@@ -53,6 +53,10 @@ until su - exam -c "xdpyinfo -display :1" >/dev/null 2>&1; do
     sleep 0.2
 done
 
+# Start TigerVNC native clipboard bridge as exam user
+su - exam -c "DISPLAY=:1 vncconfig -nowin" &
+VNCCONFIG_PID=$!
+
 # Start websockify on port 6080 for noVNC
 websockify --web=/usr/share/novnc 6080 localhost:5901 &
 
@@ -72,6 +76,7 @@ _shutdown() {
     kill -TERM $AGENT_PID 2>/dev/null || true
     kill -TERM $TERM_PID 2>/dev/null || true
     kill -TERM $FIREFOX_PID 2>/dev/null || true
+    kill -TERM $VNCCONFIG_PID 2>/dev/null || true
     su - exam -c "vncserver -kill :1" 2>/dev/null || true
     exit 0
 }

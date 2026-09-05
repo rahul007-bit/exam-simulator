@@ -5,4 +5,4 @@ __pycache__/
 var/
 .pytest_cache/
 .worktrees/
-
+docker/desktop/kubectl

@@ -37,9 +37,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     dnsutils \
     && rm -rf /var/lib/apt/lists/*
 
-# Install kubectl v1.30.2
-RUN curl -fsSL -o /usr/local/bin/kubectl https://dl.k8s.io/release/v1.30.2/bin/linux/amd64/kubectl && \
-    chmod +x /usr/local/bin/kubectl
+# Install kubectl
+COPY kubectl /usr/local/bin/kubectl
+RUN chmod +x /usr/local/bin/kubectl
 
 # Create candidate user exam
 RUN useradd -u 1000 -m -s /bin/bash exam && \

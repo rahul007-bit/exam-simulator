@@ -123,6 +123,15 @@ class RedisBus:
             try:
                 client = self.get_sync_client()
                 client.set(f"clipboard:{session_id}", text, ex=3600)
+                client.set("clipboard:active", text, ex=3600)
+                payload = json.dumps({
+                    "type": "clipboard_update",
+                    "text": text,
+                    "timestamp": time.time(),
+                })
+                client.publish(f"clipboard:{session_id}", payload)
+                if session_id != "active":
+                    client.publish("clipboard:active", payload)
                 self.publish_session_event(session_id, {
                     "type": "clipboard_update",
                     "text": text,
