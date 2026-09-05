@@ -1363,7 +1363,7 @@ window.switchWorkspaceTab = function (tab) {
 
         const host = window.location.hostname || '10.8.0.15';
         const port = (currentSession && currentSession.novnc_port) || '6080';
-        const vncUrl = `http://${host}:${port}/vnc.html?autoconnect=true&resize=scale&reconnect=true&show_dot=true&quality=6&compression=2`;
+        const vncUrl = `http://${host}:${port}/vnc.html?autoconnect=true&resize=remote&reconnect=true`;
         if (vncFrame && (!vncFrame.src || vncFrame.src === 'about:blank' || !vncFrame.src.includes(`:${port}/`))) {
             console.log('[VNC] Setting iframe src to:', vncUrl);
             vncFrame.src = vncUrl;
@@ -1374,7 +1374,7 @@ window.switchWorkspaceTab = function (tab) {
 window.openDesktopInNewTab = function () {
     const host = window.location.hostname || 'localhost';
     const port = (currentSession && currentSession.novnc_port) || '6080';
-    window.open(`http://${host}:${port}/vnc.html?autoconnect=true&resize=scale&reconnect=true&show_dot=true&quality=6&compression=2`, '_blank');
+    window.open(`http://${host}:${port}/vnc.html?autoconnect=true&resize=remote&reconnect=true`, '_blank');
 };
 
 window.toggleWorkspaceDropdown = function (event) {

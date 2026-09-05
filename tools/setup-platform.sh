@@ -411,7 +411,7 @@ User=exam
 Environment=HOME=/home/exam
 Environment=USER=exam
 ExecStartPre=-/usr/bin/vncserver -kill :1
-ExecStart=/usr/bin/vncserver :1 -fg -geometry 1920x1080 -depth 16 -SecurityTypes None -localhost yes -AlwaysShared --I-KNOW-THIS-IS-INSECURE
+ExecStart=/usr/bin/vncserver :1 -fg -geometry 1920x1080 -depth 24 -SecurityTypes None -localhost yes -AlwaysShared --I-KNOW-THIS-IS-INSECURE
 ExecStop=/usr/bin/vncserver -kill :1
 Restart=always
 RestartSec=3
