@@ -19,7 +19,7 @@ let sessionSocket = null;
 let isSessionWsConnected = false;
 
 function initSessionWebSocket(sessionId) {
-    if (!sessionId) return;
+    sessionId = sessionId || (currentSession && currentSession.session_id) || 'active';
     if (sessionSocket && (sessionSocket.readyState === WebSocket.OPEN || sessionSocket.readyState === WebSocket.CONNECTING)) {
         return;
     }
@@ -29,8 +29,12 @@ function initSessionWebSocket(sessionId) {
     try {
         sessionSocket = new WebSocket(wsUrl);
         sessionSocket.onopen = () => {
-            console.log('[Session WS] Connected to real-time session event bus');
+            console.log('[Session WS] Connected to real-time session event bus:', sessionId);
             isSessionWsConnected = true;
+            if (timerPollInterval) {
+                clearInterval(timerPollInterval);
+                timerPollInterval = null;
+            }
         };
         sessionSocket.onmessage = (event) => {
             try {
@@ -49,10 +53,12 @@ function initSessionWebSocket(sessionId) {
         };
         sessionSocket.onclose = () => {
             isSessionWsConnected = false;
+            if (currentSession && currentSession.active && !timerPollInterval) {
+                timerPollInterval = setInterval(fetchServerTimer, 5000);
+            }
             setTimeout(() => {
-                if (currentSession && currentSession.session_id) {
-                    initSessionWebSocket(currentSession.session_id);
-                }
+                const nextSid = (currentSession && currentSession.session_id) || 'active';
+                initSessionWebSocket(nextSid);
             }, 3000);
         };
     } catch (e) {
@@ -75,21 +81,23 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Re-sync timer and desktop clipboard when candidate tab becomes visible or focused
+    // Re-sync timer and desktop clipboard when candidate tab becomes visible or focused ONLY if WS is disconnected
     document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') {
+        if (document.visibilityState === 'visible' && !isSessionWsConnected && currentSession && currentSession.active) {
             fetchServerTimer();
-            if (!isSessionWsConnected) syncFromVncClipboard(false);
+            syncFromVncClipboard(false);
         }
     });
     window.addEventListener('focus', () => {
-        fetchServerTimer();
-        if (!isSessionWsConnected) syncFromVncClipboard(false);
+        if (!isSessionWsConnected && currentSession && currentSession.active) {
+            fetchServerTimer();
+            syncFromVncClipboard(false);
+        }
     });
 
-    // Background fallback poll for desktop clipboard changes (only when WebSocket is disconnected)
+    // Background fallback poll for desktop clipboard changes (ONLY when WebSocket is disconnected and exam is active)
     setInterval(() => {
-        if (!isSessionWsConnected && document.visibilityState === 'visible') {
+        if (!isSessionWsConnected && currentSession && currentSession.active && document.visibilityState === 'visible') {
             syncFromVncClipboard(false);
         }
     }, 5000);
@@ -404,6 +412,7 @@ window.handleIncomingVncClipboard = async function (text, explicitUserAction = f
 
 window.syncFromVncClipboard = async function (explicitUserAction = false) {
     if (isSyncingClipboard) return;
+    if (isSessionWsConnected && !explicitUserAction) return;
     isSyncingClipboard = true;
     try {
         const res = await fetch('/api/clipboard');
@@ -448,13 +457,13 @@ async function loadSession() {
         const recDropdownItem = document.getElementById('dropdownRecordingsItem');
         if (recDropdownItem) recDropdownItem.style.display = isAdminUser ? 'flex' : 'none';
 
+        // Always establish real-time session event WebSocket
+        initSessionWebSocket(data.session_id || 'active');
+
         if (data.active && data.current_task) {
             currentSession = data;
             updateUIWithSession(data);
             initTimer(data.time_remaining_seconds, data);
-            if (data.session_id) {
-                initSessionWebSocket(data.session_id);
-            }
             // If candidate rejoins active session without fullscreen, prompt immediately
             if (!isAdminUser && !document.fullscreenElement) {
                 showFullscreenWarning();
@@ -1023,8 +1032,10 @@ function initTimer(seconds, sessionData) {
         }
     }, 1000);
 
-    // Continuous server sync every 3 seconds to ensure lockstep accuracy
-    timerPollInterval = setInterval(fetchServerTimer, 3000);
+    // Fallback server sync ONLY if WebSocket is disconnected
+    if (!isSessionWsConnected) {
+        timerPollInterval = setInterval(fetchServerTimer, 5000);
+    }
 }
 
 function recalcAndDisplay() {
@@ -1036,6 +1047,7 @@ function recalcAndDisplay() {
 }
 
 async function fetchServerTimer() {
+    if (isSessionWsConnected) return; // WebSockets provide real-time timer ticks
     try {
         const res = await fetch('/api/timer');
         if (!res.ok) return;

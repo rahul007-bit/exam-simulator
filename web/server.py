@@ -997,9 +997,13 @@ async def session_events_websocket(websocket: WebSocket, session_id: str):
                     if msg_type == "clipboard_copy":
                         text = payload.get("text", "")
                         _last_x11_clipboard = text
-                        await redis_bus.async_set_clipboard(session_id, text)
+                        target_sid = session_id
+                        if target_sid == "active":
+                            session = deployer.load_active_session(loader)
+                            target_sid = session.session_id if session else "default"
+                        await redis_bus.async_set_clipboard(target_sid, text)
                         try:
-                            recorder.attach_or_resume(session_id)
+                            recorder.attach_or_resume(target_sid)
                             recorder.log_event("CLIPBOARD_COPY", {
                                 "length": len(text),
                                 "preview": text[:120],

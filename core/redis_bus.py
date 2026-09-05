@@ -68,8 +68,10 @@ class RedisBus:
             return False
         try:
             client = self.get_sync_client()
-            channel = f"session:{session_id}"
-            client.publish(channel, json.dumps(event_data))
+            payload = json.dumps(event_data)
+            client.publish(f"session:{session_id}", payload)
+            if session_id != "active":
+                client.publish("session:active", payload)
             return True
         except Exception as e:
             print(f"[RedisBus] Failed to publish event: {e}")
@@ -79,8 +81,10 @@ class RedisBus:
         """Asynchronously publishes an event to session:{session_id} channel."""
         try:
             client = self.get_async_client()
-            channel = f"session:{session_id}"
-            await client.publish(channel, json.dumps(event_data))
+            payload = json.dumps(event_data)
+            await client.publish(f"session:{session_id}", payload)
+            if session_id != "active":
+                await client.publish("session:active", payload)
             return True
         except Exception as e:
             print(f"[RedisBus] Failed async publish: {e}")
