@@ -12,7 +12,7 @@ export USER=exam
 mkdir -p /tmp/.X11-unix /home/exam/.vnc /home/exam/.kube
 chmod 1777 /tmp/.X11-unix
 
-# Dynamically fetch kubeconfig from Redis if available
+# Dynamically fetch kubeconfig and active task sheet from Redis if available
 python3 - << 'PYEOF'
 import os, redis
 
@@ -28,11 +28,18 @@ try:
         print(f"[Entrypoint] Successfully configured kubeconfig from Redis (session: {sid})")
     else:
         print("[Entrypoint] No kubeconfig found in Redis, starting without cluster credentials")
+
+    exam_md = r.get(f"session:{sid}:exam_md") or r.get("k8s:active_exam_md")
+    if exam_md:
+        with open("/home/exam/active_exam.md", "wb") as f:
+            f.write(exam_md)
+        print(f"[Entrypoint] Successfully injected active_exam.md from Redis")
 except Exception as e:
-    print(f"[Entrypoint] Warning: could not retrieve kubeconfig from Redis: {e}")
+    print(f"[Entrypoint] Warning: could not retrieve credentials/tasks from Redis: {e}")
 PYEOF
 
 chmod 600 /home/exam/.kube/config 2>/dev/null || true
+chmod 644 /home/exam/active_exam.md 2>/dev/null || true
 
 # Pre-seed Firefox profile to eliminate welcome screens, onboarding, and bloat
 mkdir -p /home/exam/.mozilla/firefox/default.profile

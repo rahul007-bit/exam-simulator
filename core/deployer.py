@@ -127,14 +127,15 @@ class LabDeployer:
         with open(active_file, "w", encoding="utf-8") as f:
             f.write(content)
 
-        # Also copy to /home/exam/active_exam.md if candidate home exists
-        exam_home_file = Path("/home/exam/active_exam.md")
-        if Path("/home/exam").exists():
-            try:
-                exam_home_file.write_text(content, encoding="utf-8")
-                os.chmod(exam_home_file, 0o644)
-            except Exception:
-                pass
+        # Store task sheet in Redis for candidate container injection (zero host /home/exam pollution)
+        try:
+            from core.redis_bus import bus as redis_bus
+            client = redis_bus.get_sync_client()
+            if client:
+                client.setex(f"session:{session.session_id}:exam_md", 86400, content)
+                client.setex("k8s:active_exam_md", 86400, content)
+        except Exception:
+            pass
 
         return md_file
 
@@ -165,13 +166,6 @@ class LabDeployer:
         if active_file.exists():
             try:
                 active_file.unlink()
-            except Exception:
-                pass
-
-        exam_home_file = Path("/home/exam/active_exam.md")
-        if exam_home_file.exists():
-            try:
-                exam_home_file.unlink()
             except Exception:
                 pass
 
