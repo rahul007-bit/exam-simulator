@@ -973,6 +973,7 @@ function setLoadingState(loading, title = 'Processing...', desc = 'Please wait w
     const descEl = document.getElementById('loadingDesc');
     const container = document.getElementById('loadingProgressContainer');
     const fill = document.getElementById('loadingProgressFill');
+    const statusEl = document.getElementById('loadingProgressStatus');
 
     if (titleEl) titleEl.innerText = title;
     if (descEl) descEl.innerText = desc;
@@ -980,19 +981,15 @@ function setLoadingState(loading, title = 'Processing...', desc = 'Please wait w
     if (overlay) {
         if (loading) {
             overlay.classList.add('active');
-            if (container) {
-                // Show progress bar container for task navigation operations
-                container.style.display = 'flex';
-                if (fill) fill.style.width = '10%';
-            }
+            // Progress bar starts hidden; only updateTransitionProgress reveals it
+            if (container) container.style.display = 'none';
+            if (fill) fill.style.width = '0%';
+            if (statusEl) statusEl.innerText = '';
         } else {
             overlay.classList.remove('active');
             if (container) container.style.display = 'none';
             if (fill) fill.style.width = '0%';
-            ['stepGrade', 'stepClean', 'stepDeploy'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.className = 'loading-step-item';
-            });
+            if (statusEl) statusEl.innerText = '';
         }
     }
 
@@ -1011,9 +1008,7 @@ function updateTransitionProgress(data) {
     const fill = document.getElementById('loadingProgressFill');
     const titleEl = document.getElementById('loadingTitle');
     const descEl = document.getElementById('loadingDesc');
-    const stepGrade = document.getElementById('stepGrade');
-    const stepClean = document.getElementById('stepClean');
-    const stepDeploy = document.getElementById('stepDeploy');
+    const statusEl = document.getElementById('loadingProgressStatus');
 
     if (container) container.style.display = 'flex';
     if (titleEl && data.title) titleEl.innerText = data.title;
@@ -1021,24 +1016,13 @@ function updateTransitionProgress(data) {
     if (fill && typeof data.percent === 'number') {
         fill.style.width = Math.min(100, Math.max(0, data.percent)) + '%';
     }
-
-    const stage = data.stage;
-    if (stage === 'grading') {
-        if (stepGrade) stepGrade.className = 'loading-step-item active';
-        if (stepClean) stepClean.className = 'loading-step-item';
-        if (stepDeploy) stepDeploy.className = 'loading-step-item';
-    } else if (stage === 'cleanup') {
-        if (stepGrade) stepGrade.className = 'loading-step-item done';
-        if (stepClean) stepClean.className = 'loading-step-item active';
-        if (stepDeploy) stepDeploy.className = 'loading-step-item';
-    } else if (stage === 'deploying') {
-        if (stepGrade) stepGrade.className = 'loading-step-item done';
-        if (stepClean) stepClean.className = 'loading-step-item done';
-        if (stepDeploy) stepDeploy.className = 'loading-step-item active';
-    } else if (stage === 'ready') {
-        if (stepGrade) stepGrade.className = 'loading-step-item done';
-        if (stepClean) stepClean.className = 'loading-step-item done';
-        if (stepDeploy) stepDeploy.className = 'loading-step-item done';
+    if (statusEl) {
+        if (data.step && data.total_steps) {
+            const stageLabel = (data.stage || '').toUpperCase();
+            statusEl.innerText = `Step ${data.step} of ${data.total_steps} (${stageLabel})`;
+        } else {
+            statusEl.innerText = '';
+        }
     }
 }
 
