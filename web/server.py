@@ -603,6 +603,9 @@ def action_submit():
             total_earned=total_earned,
             total_possible=total_possible,
         )
+    except Exception as ex:
+        print(f"[Warning] Failed to finalize recording: {ex}")
+
     try:
         if session and session.session_id:
             desktop_mgr.stop_desktop(session.session_id)
