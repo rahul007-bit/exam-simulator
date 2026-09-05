@@ -7,5 +7,6 @@ def grade(ctx: KubernetesContext) -> GradeResult:
     if not pod:
         return GradeResult(passed=False, score=0, max_score=2, message="Pod auth-api not found in auth-system")
     if not ctx.check_pod_ready(pod):
-        return GradeResult(passed=False, score=0, max_score=2, message="Pod auth-api is not Ready")
+        if not ctx.wait_pod_ready("auth-system", "auth-api", timeout=10):
+            return GradeResult(passed=False, score=0, max_score=2, message="Pod auth-api is not Ready")
     return GradeResult(passed=True, score=2, max_score=2, message="auth-api started successfully with valid ConfigMap key")

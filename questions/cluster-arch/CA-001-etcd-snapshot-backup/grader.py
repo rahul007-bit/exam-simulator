@@ -11,9 +11,9 @@ def grade(ctx: KubernetesContext) -> GradeResult:
         return GradeResult(False, 0, 3, f"No snapshot file found at {SNAPSHOT} on control-plane node")
     if ctx.ssh_cmd("NODE_1", f"test -s {SNAPSHOT}") is None:
         return GradeResult(False, 1, 3, f"Snapshot file {SNAPSHOT} exists but is empty (0 bytes)")
-    status = ctx.ssh_cmd("NODE_1", f"etcdctl snapshot status {SNAPSHOT} 2>/dev/null | head -1")
-    if status:
-        return GradeResult(True, 3, 3, f"etcd snapshot verified: {status}")
-    if ctx.ssh_cmd("NODE_1", "command -v etcdctl") is None:
-        return GradeResult(True, 3, 3, f"Snapshot {SNAPSHOT} exists and is non-empty (etcdctl not installed for deeper validation)")
-    return GradeResult(False, 2, 3, f"Snapshot {SNAPSHOT} exists but etcdctl snapshot status failed (corrupt or not a valid snapshot)")
+    status = ctx.ssh_cmd("NODE_1", f"(etcdutl snapshot status {SNAPSHOT} 2>&1 || etcdctl snapshot status {SNAPSHOT} 2>&1) | grep -v 'NAME:' | grep -v -i 'error' | grep -v '^\\*\\*' | head -1")
+    if status and not status.startswith("NAME:") and not "USAGE:" in status:
+        return GradeResult(True, 3, 3, f"etcd snapshot verified: {status.strip()}")
+    if ctx.ssh_cmd("NODE_1", "command -v etcdutl || command -v etcdctl") is None:
+        return GradeResult(True, 3, 3, f"Snapshot {SNAPSHOT} exists and is non-empty (etcdctl/etcdutl not installed for deeper validation)")
+    return GradeResult(False, 2, 3, f"Snapshot {SNAPSHOT} exists but snapshot verification failed (corrupt or not a valid snapshot)")

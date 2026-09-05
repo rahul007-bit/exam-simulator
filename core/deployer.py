@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 from core.models import Question, ExamSession
 from core.loader import QuestionLoader
+from core.recorder import recorder
 
 SYSTEM_NAMESPACES = {"default", "kube-system", "kube-public", "kube-node-lease", "metallb-system", "local-path-storage"}
 
@@ -120,6 +121,11 @@ class LabDeployer:
 
     def clear_session(self, cleanup_cluster: bool = True) -> None:
         if self.session_file.exists():
+            try:
+                recorder.log_event("SESSION_RESET", {"cleanup_cluster": cleanup_cluster})
+                recorder.close()
+            except Exception:
+                pass
             if cleanup_cluster:
                 self._cleanup_cluster_resources()
             self.session_file.unlink()
@@ -221,6 +227,20 @@ class LabDeployer:
                      "strict-policy-enforcer", "admission-hook", "audit-injector", "--ignore-not-found"],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
                 )
+                try:
+                    if questions is None:
+                        subprocess.run(
+                            ["kubectl", "--context", ctx_name, "--request-timeout=3s", "delete", "pv", "--all", "--wait=false"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
+                        )
+                    else:
+                        subprocess.run(
+                            ["kubectl", "--context", ctx_name, "--request-timeout=3s", "delete", "pv",
+                             "--field-selector=status.phase=Released", "--wait=false"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
+                        )
+                except Exception:
+                    pass
             except Exception:
                 pass
 
@@ -338,6 +358,17 @@ class LabDeployer:
             scores={},
         )
         self.save_session(session)
+        try:
+            recorder.start_session(
+                session_id=session.session_id,
+                name=session.name,
+                total_tasks=len(session.questions),
+                time_limit_minutes=time_limit_minutes,
+                target_contexts=target_contexts,
+                questions=[{"id": q.id, "title": q.title, "points": q.points, "context": q.target_context} for q in session.questions],
+            )
+        except Exception:
+            pass
         md_path = self.export_tasks_markdown(session)
         print(f"  Exported task sheet to: {md_path.relative_to(self.sets_dir.parent)}")
 
@@ -368,6 +399,17 @@ class LabDeployer:
             scores={},
         )
         self.save_session(session)
+        try:
+            recorder.start_session(
+                session_id=session.session_id,
+                name=session.name,
+                total_tasks=len(session.questions),
+                time_limit_minutes=time_limit_minutes,
+                target_contexts=session.target_contexts,
+                questions=[{"id": q.id, "title": q.title, "points": q.points, "context": q.target_context} for q in questions],
+            )
+        except Exception:
+            pass
         self.export_tasks_markdown(session)
         self.deploy_step(session, 0)
         return session
@@ -376,6 +418,11 @@ class LabDeployer:
         if index < 0 or index >= len(session.questions):
             print(f"[Error] Task index {index + 1} out of range (1 to {len(session.questions)}).")
             return False
+
+        try:
+            recorder.attach_or_resume(session.session_id, session.name)
+        except Exception:
+            pass
 
         leaving_q = None
         is_leaving_flagged = False
@@ -420,6 +467,19 @@ class LabDeployer:
                         "message": "Evaluation timed out or error",
                     }
 
+            try:
+                leaving_score = session.scores.get(leaving_q.id, {})
+                recorder.log_event("TASK_EVALUATION", {
+                    "task_num": session.current_index + 1,
+                    "question_id": leaving_q.id,
+                    "score": leaving_score.get("score", 0),
+                    "max_score": leaving_score.get("max_score", leaving_q.points),
+                    "passed": leaving_score.get("passed", False),
+                    "message": leaving_score.get("message", ""),
+                })
+            except Exception:
+                pass
+
         session.current_index = index
         q = session.questions[index]
 
@@ -457,14 +517,17 @@ class LabDeployer:
                 pass
 
         # Prevent cordoning from leaking across exam tasks
-        if q.target_context == "k3d-cka" and q.id not in ("CA-005", "TR-008", "TR-014"):
+        k3d_ctx = os.getenv("K3D_CONTEXT", "k3d-cka")
+        kubeadm_ctx = os.getenv("KUBEADM_CONTEXT", "kubeadm-vms")
+        k3d_cluster = os.getenv("K3D_CLUSTER_NAME", "cka")
+        if q.target_context == k3d_ctx and q.id not in ("CA-005", "TR-008", "TR-014"):
             try:
-                subprocess.run(["kubectl", "--context", "k3d-cka", "uncordon", "k3d-dev-agent-0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
+                subprocess.run(["kubectl", "--context", k3d_ctx, "uncordon", f"k3d-{k3d_cluster}-agent-0", f"k3d-{k3d_cluster}-agent-1"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
             except Exception:
                 pass
-        elif q.target_context == "kubeadm-vms" and q.id not in ("CA-004", "TR-008", "TR-014"):
+        elif q.target_context == kubeadm_ctx and q.id not in ("CA-004", "TR-008", "TR-014"):
             try:
-                subprocess.run(["kubectl", "--context", "kubeadm-vms", "uncordon", "node2", "node3"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
+                subprocess.run(["kubectl", "--context", kubeadm_ctx, "uncordon", os.getenv("NODE_2", "node2"), os.getenv("NODE_3", "node3")], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
             except Exception:
                 pass
 
@@ -476,6 +539,21 @@ class LabDeployer:
             or (session.scores.get(q.id, {}).get("message", "").startswith("Flagged for review"))
         )
 
+        try:
+            recorder.log_event("TASK_DEPLOYED", {
+                "task_num": index + 1,
+                "question_id": q.id,
+                "title": q.title,
+                "domain": q.domain.value if hasattr(q.domain, "value") else str(q.domain),
+                "difficulty": q.difficulty.value if hasattr(q.difficulty, "value") else str(q.difficulty),
+                "context": q.target_context,
+                "namespace": q.namespace or "default",
+                "points": q.points,
+                "is_flagged": is_target_flagged,
+            })
+        except Exception:
+            pass
+
         should_run_setup = True
         if is_target_flagged and not force_setup:
             # Candidate switched back to an already attempted / flagged task.
@@ -484,10 +562,22 @@ class LabDeployer:
             print(" [PRESERVED FLAGGED WORK]")
 
         if should_run_setup and q.setup_script and q.setup_script.exists():
+            if q.target_context:
+                try:
+                    subprocess.run(
+                        ["kubectl", "config", "use-context", q.target_context],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=3,
+                    )
+                except Exception:
+                    pass
+            setup_env = os.environ.copy()
+            setup_env["KUBECTL_CONTEXT"] = q.target_context or "k3d-cka"
             try:
                 res = subprocess.run(
                     ["bash", str(q.setup_script)],
-                    env=os.environ.copy(),
+                    env=setup_env,
                     cwd=str(q.path),
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,

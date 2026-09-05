@@ -9,6 +9,6 @@ cluster_scoped: false
 tags:
 - services
 - nodeport
-description: NodePort Service `web-np` in `web-services` forwards traffic to wrong
-  port `9090` instead of containerPort `80`.
-grader_hint: 'Service web-np has targetPort: 80'
+description: NodePort Service `web-svc` in `web-services` forwards traffic to wrong
+  port `8080` instead of containerPort `80`.
+grader_hint: 'Service web-svc has targetPort: 80'

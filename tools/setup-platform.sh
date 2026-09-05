@@ -158,7 +158,7 @@ gpasswd -d "${EXAM_USER}" sudo 2>/dev/null || true
 
 # Strictly whitelisted sudo for candidate examctl commands (prevents host tampering)
 cat << EOF > /etc/sudoers.d/examctl
-${EXAM_USER} ALL=(root) NOPASSWD: /root/cka-labs/labctl tasks, /root/cka-labs/labctl status, /root/cka-labs/labctl next, /root/cka-labs/labctl prev, /root/cka-labs/labctl jump *, /root/cka-labs/labctl flag, /root/cka-labs/labctl flag *, /root/cka-labs/labctl unflag, /root/cka-labs/labctl unflag *
+${EXAM_USER} ALL=(root) NOPASSWD: /root/cka-labs/labctl tasks, /root/cka-labs/labctl status, /root/cka-labs/labctl next, /root/cka-labs/labctl prev, /root/cka-labs/labctl jump *, /root/cka-labs/labctl flag, /root/cka-labs/labctl flag *, /root/cka-labs/labctl unflag, /root/cka-labs/labctl unflag *, /root/cka-labs/labctl record-shell, /root/cka-labs/labctl record-shell *
 EOF
 chmod 0440 /etc/sudoers.d/examctl
 rm -f /etc/sudoers.d/exam
@@ -239,7 +239,7 @@ Version=1.0
 Type=Application
 Name=Terminal
 Comment=Xfce Terminal
-Exec=/usr/bin/xfce4-terminal
+Exec=/usr/local/bin/xfce4-terminal
 Icon=org.xfce.terminal
 Terminal=false
 Categories=System;TerminalEmulator;
@@ -259,6 +259,18 @@ EOF
 
 chmod +x /home/exam/Desktop/*.desktop
 chown -R exam:exam /home/exam/Desktop
+
+# System-wide wrapper for xfce4-terminal to ensure ANY launch (dock, menu, shortcut) is recorded
+cat << 'EOF' > /usr/local/bin/xfce4-terminal
+#!/usr/bin/env bash
+if [ -z "$EXAM_RECORDED" ]; then
+    export EXAM_RECORDED=1
+    exec /usr/bin/xfce4-terminal -e "sudo /root/cka-labs/labctl record-shell" "$@"
+else
+    exec /usr/bin/xfce4-terminal "$@"
+fi
+EOF
+chmod 0755 /usr/local/bin/xfce4-terminal
 
 # ------------------------------------------------------------------------------
 # 7. noVNC Patches: Keyboard Lock & Bidirectional Clipboard Bridge

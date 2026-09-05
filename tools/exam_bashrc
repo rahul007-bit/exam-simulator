@@ -55,6 +55,14 @@ export now="--force --grace-period=0"
 export EDITOR="nano"
 export KUBE_EDITOR="nano"
 
+# Auto-wrap unrecorded interactive shells in desktop into exam session recording
+if [[ $- == *i* ]] && [ -z "$EXAM_RECORDED" ] && [ -t 0 ] && [ -n "$DISPLAY" ]; then
+    if sudo -n /root/cka-labs/labctl status >/dev/null 2>&1; then
+        export EXAM_RECORDED=1
+        exec sudo /root/cka-labs/labctl record-shell
+    fi
+fi
+
 # Welcome banner (shown on interactive shell startup)
 if [[ $- == *i* ]]; then
 cat << 'EOF_BANNER'

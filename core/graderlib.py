@@ -25,11 +25,21 @@ from core.models import GradeResult  # noqa: F401
 class KubernetesContext:
     def __init__(self, context_name: str = "k3d-cka"):
         self.context_name = context_name
-        self.node_1_ip = os.getenv("NODE_1_IP", os.getenv("NODE_1", "127.0.0.1"))
-        self.node_2_ip = os.getenv("NODE_2_IP", os.getenv("NODE_2", "127.0.0.1"))
-        self.node_3_ip = os.getenv("NODE_3_IP", os.getenv("NODE_3", "127.0.0.1"))
-        self.ssh_key_path = os.getenv("SSH_KEY_PATH", os.path.expanduser("~/.ssh/id_rsa"))
+        self.node_1_ip = os.getenv("NODE_1_IP", os.getenv("NODE_1", "node1"))
+        self.node_2_ip = os.getenv("NODE_2_IP", os.getenv("NODE_2", "node2"))
+        self.node_3_ip = os.getenv("NODE_3_IP", os.getenv("NODE_3", "node3"))
+        self.ssh_key_path = os.getenv("SSH_KEY_PATH", os.getenv("SSH_KEY", os.path.expanduser("~/.ssh/id_rsa")))
         self.ssh_user = os.getenv("SSH_USER", "root")
+
+    def get_worker_nodes(self) -> List[Dict[str, Any]]:
+        """Returns all nodes that are not control-plane nodes."""
+        nodes = self.get_nodes()
+        workers = []
+        for n in nodes:
+            labels = n.get("metadata", {}).get("labels", {})
+            if "node-role.kubernetes.io/control-plane" not in labels and "node-role.kubernetes.io/master" not in labels:
+                workers.append(n)
+        return workers
 
     def run_cmd(self, cmd: List[str], timeout: int = 4) -> subprocess.CompletedProcess:
         return subprocess.run(
@@ -216,6 +226,15 @@ class KubernetesContext:
         if not container_statuses:
             return False
         return all(cs.get("ready", False) for cs in container_statuses)
+
+    def wait_pod_ready(self, namespace: str, name: str, timeout: int = 15) -> bool:
+        start = time.time()
+        while time.time() - start < timeout:
+            pod = self.get_pod(namespace, name)
+            if pod and self.check_pod_ready(pod):
+                return True
+            time.sleep(1)
+        return False
 
     def get_pod_restart_count(self, pod: Dict[str, Any]) -> int:
         if not pod or "status" not in pod:
