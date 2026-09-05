@@ -23,6 +23,8 @@ from core.selector import QuestionSelector
 from core.deployer import LabDeployer
 from core.grader import LabGrader
 from core.models import ExamSession, Question, GradeResult
+from core.recorder import recorder
+from core.redis_bus import bus as redis_bus
 
 app = FastAPI(title="Kubernetes Exam Web Simulator", version="2.0.0")
 
@@ -40,6 +42,8 @@ STATIC_DIR = BASE_DIR / "web" / "static"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 REPORTS_DIR = BASE_DIR / "reports"
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+RECORDINGS_DIR = BASE_DIR / "recordings"
+RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
 
 loader = QuestionLoader(BASE_DIR / "questions")
 selector = QuestionSelector(loader, BASE_DIR / "presets")
@@ -106,6 +110,11 @@ class PresetSelectRequest(BaseModel):
 
 class ClipboardRequest(BaseModel):
     text: str
+
+
+class ClientEventRequest(BaseModel):
+    event_type: str
+    data: Optional[Dict[str, Any]] = None
 
 
 _selected_preset_override: Optional[str] = None
@@ -302,14 +311,21 @@ def select_preset(req: PresetSelectRequest):
 
 @app.post("/api/clipboard")
 def set_clipboard_endpoint(req: ClipboardRequest):
+    global _last_x11_clipboard
     try:
-        env = {
-            "DISPLAY": os.getenv("VNC_DISPLAY", ":1"),
-            "XAUTHORITY": os.getenv("XAUTHORITY", "/home/exam/.Xauthority"),
-            "HOME": os.getenv("EXAM_HOME", "/home/exam"),
-        }
-        subprocess.run(["xsel", "-b", "-i"], input=req.text, text=True, env=env, timeout=1)
-        subprocess.run(["xsel", "-p", "-i"], input=req.text, text=True, env=env, timeout=1)
+        session = deployer.load_active_session(loader)
+        sid = session.session_id if session else "default"
+        _last_x11_clipboard = req.text
+        redis_bus.set_clipboard(sid, req.text)
+        if session:
+            try:
+                recorder.attach_or_resume(session.session_id, session.name)
+                recorder.log_event("CLIPBOARD_COPY", {
+                    "length": len(req.text),
+                    "preview": req.text[:120],
+                })
+            except Exception:
+                pass
         return {"status": "ok", "length": len(req.text)}
     except Exception as e:
         return {"status": "error", "error": str(e)}
@@ -318,16 +334,9 @@ def set_clipboard_endpoint(req: ClipboardRequest):
 @app.get("/api/clipboard")
 def get_clipboard_endpoint():
     try:
-        env = {
-            "DISPLAY": os.getenv("VNC_DISPLAY", ":1"),
-            "XAUTHORITY": os.getenv("XAUTHORITY", "/home/exam/.Xauthority"),
-            "HOME": os.getenv("EXAM_HOME", "/home/exam"),
-        }
-        res = subprocess.run(["xsel", "-b", "-o"], env=env, capture_output=True, text=True, timeout=1)
-        text = res.stdout
-        if not text:
-            res_p = subprocess.run(["xsel", "-p", "-o"], env=env, capture_output=True, text=True, timeout=1)
-            text = res_p.stdout
+        session = deployer.load_active_session(loader)
+        sid = session.session_id if session else "default"
+        text = redis_bus.get_clipboard(sid)
         return {"text": text}
     except Exception as e:
         return {"text": "", "error": str(e)}
@@ -394,6 +403,16 @@ def action_flag(req: FlagRequest):
         is_flagged = True
 
     deployer.save_session(session)
+    try:
+        recorder.attach_or_resume(session.session_id, session.name)
+        recorder.log_event("TASK_FLAGGED" if is_flagged else "TASK_UNFLAGGED", {
+            "task_num": idx + 1,
+            "question_id": target_q.id,
+            "title": target_q.title,
+            "is_flagged": is_flagged,
+        })
+    except Exception:
+        pass
     return {"id": target_q.id, "task_num": idx + 1, "is_flagged": is_flagged, "flagged_ids": session.flagged}
 
 
@@ -404,6 +423,16 @@ def action_retry():
         raise HTTPException(status_code=400, detail="No active question to retry")
 
     cur_idx = session.current_index
+    try:
+        cur_q = session.current_question
+        recorder.attach_or_resume(session.session_id, session.name)
+        recorder.log_event("TASK_RETRY", {
+            "task_num": cur_idx + 1,
+            "question_id": cur_q.id if cur_q else None,
+            "title": cur_q.title if cur_q else None,
+        })
+    except Exception:
+        pass
     # Re-run deploy step for current index with forced setup reset
     deployer.deploy_step(session, cur_idx, force_setup=True)
     return {"status": "ok", "message": f"Task {cur_idx + 1} re-initialized"}
@@ -426,6 +455,18 @@ def action_submit():
                 "max_score": res.max_score,
                 "message": res.message,
             }
+            try:
+                recorder.attach_or_resume(session.session_id, session.name)
+                recorder.log_event("TASK_EVALUATION", {
+                    "task_num": session.current_index + 1,
+                    "question_id": cur_q.id,
+                    "score": res.score,
+                    "max_score": res.max_score,
+                    "passed": res.passed,
+                    "message": res.message,
+                })
+            except Exception:
+                pass
         except Exception as e:
             session.scores[cur_q.id] = {
                 "passed": False,
@@ -437,7 +478,7 @@ def action_submit():
 
     # 2. Grade all flagged tasks upon final exam submission
     flagged_ids = set(getattr(session, "flagged", []) or [])
-    for q in session.questions:
+    for idx, q in enumerate(session.questions):
         if session.current_question and q.id == session.current_question.id:
             continue
         sc = session.scores.get(q.id)
@@ -451,6 +492,18 @@ def action_submit():
                     "max_score": res.max_score,
                     "message": res.message,
                 }
+                try:
+                    recorder.attach_or_resume(session.session_id, session.name)
+                    recorder.log_event("TASK_EVALUATION", {
+                        "task_num": idx + 1,
+                        "question_id": q.id,
+                        "score": res.score,
+                        "max_score": res.max_score,
+                        "passed": res.passed,
+                        "message": res.message,
+                    })
+                except Exception:
+                    pass
             except Exception as e:
                 session.scores[q.id] = {
                     "passed": False,
@@ -523,6 +576,18 @@ def action_submit():
     except Exception as ex:
         print(f"[Warning] Failed to persist report file: {ex}")
 
+    try:
+        recorder.finish_session(
+            session_id=report_data["session_id"],
+            scorecard=scorecard_rows,
+            percentage=report_data["percentage"],
+            passed=report_data["passed"],
+            total_earned=total_earned,
+            total_possible=total_possible,
+        )
+    except Exception as ex:
+        print(f"[Warning] Failed to finalize recording: {ex}")
+
     return report_data
 
 
@@ -558,6 +623,48 @@ def get_report(filename: str):
         raise HTTPException(status_code=404, detail="Report not found")
     media_type = "application/json" if filename.endswith(".json") else "text/markdown"
     return FileResponse(file_path, media_type=media_type, filename=filename)
+
+
+@app.get("/api/recordings")
+def list_recordings_endpoint():
+    recs = recorder.list_recordings()
+    return {"recordings": recs, "total": len(recs)}
+
+
+@app.get("/api/recordings/{session_id}")
+def get_recording_detail_endpoint(session_id: str):
+    data = recorder.get_recording(session_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Recording not found")
+    return data
+
+
+@app.get("/api/recordings/{session_id}/cast")
+def get_recording_cast_endpoint(session_id: str):
+    cast_path = recorder.get_cast_path(session_id)
+    if not cast_path or not cast_path.is_file():
+        raise HTTPException(status_code=404, detail="Asciinema cast recording not found")
+    return FileResponse(
+        cast_path,
+        media_type="application/x-asciicast",
+        filename=f"{session_id}.cast",
+    )
+
+
+@app.get("/api/recordings/{session_id}/events")
+def get_recording_events_endpoint(session_id: str):
+    events = recorder.get_events(session_id)
+    return {"session_id": session_id, "events": events, "total": len(events)}
+
+
+@app.post("/api/recordings/{session_id}/event")
+def log_client_event_endpoint(session_id: str, req: ClientEventRequest):
+    try:
+        recorder.attach_or_resume(session_id)
+        recorder.log_event(req.event_type, req.data or {})
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
 
 
 @app.post("/api/start")
@@ -606,9 +713,19 @@ def reset_exam():
 async def terminal_websocket(websocket: WebSocket):
     await websocket.accept()
 
+    session = deployer.load_active_session(loader)
+    if session:
+        try:
+            recorder.attach_or_resume(session.session_id, session.name)
+            recorder.log_event("TERMINAL_ATTACH", {"session_id": session.session_id})
+        except Exception:
+            pass
+
     env = os.environ.copy()
     env["TERM"] = "xterm-256color"
     env["COLORTERM"] = "truecolor"
+    env["EXAM_RECORDED"] = "1"
+    env["WEB_TERMINAL"] = "1"
 
     pid, master_fd = pty.fork()
     if pid == 0:
@@ -666,6 +783,10 @@ async def terminal_websocket(websocket: WebSocket):
                         data = os.read(master_fd, 4096)
                         if not data:
                             break
+                        try:
+                            recorder.record_output(data)
+                        except Exception:
+                            pass
                         await websocket.send_bytes(data)
                 except Exception:
                     break
@@ -676,6 +797,10 @@ async def terminal_websocket(websocket: WebSocket):
                     msg = await websocket.receive()
                     if "bytes" in msg and msg["bytes"]:
                         os.write(master_fd, msg["bytes"])
+                        try:
+                            recorder.record_input(msg["bytes"])
+                        except Exception:
+                            pass
                     elif "text" in msg and msg["text"]:
                         text = msg["text"]
                         if text.startswith('{"resize":'):
@@ -685,10 +810,16 @@ async def terminal_websocket(websocket: WebSocket):
                                 cols = int(rdata.get("cols", 80))
                                 winsize = struct.pack("HHHH", rows, cols, 0, 0)
                                 fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
+                                recorder.record_resize(cols, rows)
                             except Exception:
                                 pass
                         else:
-                            os.write(master_fd, text.encode("utf-8"))
+                            raw_b = text.encode("utf-8")
+                            os.write(master_fd, raw_b)
+                            try:
+                                recorder.record_input(raw_b)
+                            except Exception:
+                                pass
                 except WebSocketDisconnect:
                     break
                 except Exception:
@@ -703,6 +834,11 @@ async def terminal_websocket(websocket: WebSocket):
         )
         for task in pending:
             task.cancel()
+
+        try:
+            recorder.log_event("TERMINAL_DETACH")
+        except Exception:
+            pass
 
         try:
             os.close(master_fd)
@@ -801,6 +937,157 @@ async def vnc_ws_novnc_websockify(websocket: WebSocket):
 @app.websocket("/novnc/ws/vnc")
 async def vnc_ws_novnc_vnc(websocket: WebSocket):
     await _proxy_vnc(websocket)
+
+
+# --- Real-Time Session & Redis Pub/Sub WebSocket ---
+
+@app.websocket("/ws/session/{session_id}")
+async def session_events_websocket(websocket: WebSocket, session_id: str):
+    await websocket.accept()
+    if not redis_bus.is_available():
+        # Fallback loop if Redis is temporarily offline
+        try:
+            while True:
+                data = await websocket.receive_text()
+                try:
+                    msg = json.loads(data)
+                    if msg.get("type") == "clipboard_copy":
+                        text = msg.get("text", "")
+                        global _last_x11_clipboard
+                        _last_x11_clipboard = text
+                        await redis_bus.async_set_clipboard(session_id, text)
+                        try:
+                            recorder.attach_or_resume(session_id)
+                            recorder.log_event("CLIPBOARD_COPY", {
+                                "length": len(text),
+                                "preview": text[:120],
+                            })
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+        except WebSocketDisconnect:
+            pass
+        return
+
+    async_redis = redis_bus.get_async_client()
+    pubsub = async_redis.pubsub()
+    channel = f"session:{session_id}"
+    await pubsub.subscribe(channel)
+
+    async def pubsub_to_ws():
+        try:
+            async for message in pubsub.listen():
+                if message.get("type") == "message":
+                    raw_data = message.get("data")
+                    if isinstance(raw_data, bytes):
+                        raw_data = raw_data.decode("utf-8")
+                    await websocket.send_text(raw_data)
+        except Exception:
+            pass
+
+    async def ws_to_redis():
+        global _last_x11_clipboard
+        try:
+            while True:
+                raw_text = await websocket.receive_text()
+                try:
+                    payload = json.loads(raw_text)
+                    msg_type = payload.get("type")
+                    if msg_type == "clipboard_copy":
+                        text = payload.get("text", "")
+                        _last_x11_clipboard = text
+                        await redis_bus.async_set_clipboard(session_id, text)
+                        try:
+                            recorder.attach_or_resume(session_id)
+                            recorder.log_event("CLIPBOARD_COPY", {
+                                "length": len(text),
+                                "preview": text[:120],
+                            })
+                        except Exception:
+                            pass
+                    elif msg_type == "ping":
+                        await websocket.send_text(json.dumps({"type": "pong", "time": time.time()}))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    t1 = asyncio.create_task(pubsub_to_ws())
+    t2 = asyncio.create_task(ws_to_redis())
+    try:
+        done, pending = await asyncio.wait([t1, t2], return_when=asyncio.FIRST_COMPLETED)
+        for t in pending:
+            t.cancel()
+    finally:
+        try:
+            await pubsub.unsubscribe(channel)
+            await pubsub.close()
+        except Exception:
+            pass
+
+
+# --- Background Workers: Host Clipboard & Timer Broadcast ---
+
+_last_x11_clipboard = ""
+
+@app.on_event("startup")
+async def start_background_workers():
+    asyncio.create_task(_clipboard_x11_monitor())
+    asyncio.create_task(_session_timer_broadcaster())
+
+async def _clipboard_x11_monitor():
+    global _last_x11_clipboard
+    loop = asyncio.get_running_loop()
+    while True:
+        try:
+            session = deployer.load_active_session(loader)
+            if session and session.session_id:
+                sid = session.session_id
+                def read_xsel():
+                    env = {
+                        "DISPLAY": os.getenv("VNC_DISPLAY", ":1"),
+                        "XAUTHORITY": os.getenv("XAUTHORITY", "/home/exam/.Xauthority"),
+                        "HOME": os.getenv("EXAM_HOME", "/home/exam"),
+                    }
+                    try:
+                        res = subprocess.run(["xsel", "-b", "-o"], env=env, capture_output=True, text=True, timeout=1)
+                        t = res.stdout
+                        if not t:
+                            res_p = subprocess.run(["xsel", "-p", "-o"], env=env, capture_output=True, text=True, timeout=1)
+                            t = res_p.stdout
+                        return t or ""
+                    except Exception:
+                        return ""
+
+                current = await loop.run_in_executor(None, read_xsel)
+                if current and current != _last_x11_clipboard:
+                    _last_x11_clipboard = current
+                    await redis_bus.async_publish_session_event(sid, {
+                        "type": "clipboard_update",
+                        "text": current,
+                        "timestamp": time.time(),
+                    })
+        except Exception:
+            pass
+        await asyncio.sleep(1.0)
+
+async def _session_timer_broadcaster():
+    while True:
+        try:
+            session = deployer.load_active_session(loader)
+            if session and session.session_id:
+                rem = _calculate_time_remaining(session)
+                if rem is not None:
+                    await redis_bus.async_publish_session_event(session.session_id, {
+                        "type": "timer_tick",
+                        "time_remaining_seconds": rem,
+                        "server_timestamp": time.time(),
+                    })
+        except Exception:
+            pass
+        await asyncio.sleep(2.0)
+
 
 
 # Mount noVNC static files if present

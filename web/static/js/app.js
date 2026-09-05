@@ -15,6 +15,50 @@ let lastKnownVncClipboard = '';
 let isSyncingClipboard = false;
 let pendingHostClipboardText = null;
 let clipboardToastTimer = null;
+let sessionSocket = null;
+let isSessionWsConnected = false;
+
+function initSessionWebSocket(sessionId) {
+    if (!sessionId) return;
+    if (sessionSocket && (sessionSocket.readyState === WebSocket.OPEN || sessionSocket.readyState === WebSocket.CONNECTING)) {
+        return;
+    }
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws/session/${sessionId}`;
+
+    try {
+        sessionSocket = new WebSocket(wsUrl);
+        sessionSocket.onopen = () => {
+            console.log('[Session WS] Connected to real-time session event bus');
+            isSessionWsConnected = true;
+        };
+        sessionSocket.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                if (data.type === 'clipboard_update') {
+                    if (data.text) {
+                        handleIncomingVncClipboard(data.text, false);
+                    }
+                } else if (data.type === 'timer_tick') {
+                    if (typeof data.time_remaining_seconds === 'number') {
+                        timeRemainingSeconds = data.time_remaining_seconds;
+                        updateTimerDisplay();
+                    }
+                }
+            } catch (_) {}
+        };
+        sessionSocket.onclose = () => {
+            isSessionWsConnected = false;
+            setTimeout(() => {
+                if (currentSession && currentSession.session_id) {
+                    initSessionWebSocket(currentSession.session_id);
+                }
+            }, 3000);
+        };
+    } catch (e) {
+        isSessionWsConnected = false;
+    }
+}
 
 document.addEventListener('DOMContentLoaded', () => {
     initSplitPane();
@@ -35,20 +79,20 @@ document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
             fetchServerTimer();
-            syncFromVncClipboard(false);
+            if (!isSessionWsConnected) syncFromVncClipboard(false);
         }
     });
     window.addEventListener('focus', () => {
         fetchServerTimer();
-        syncFromVncClipboard(false);
+        if (!isSessionWsConnected) syncFromVncClipboard(false);
     });
 
-    // Background poll for desktop clipboard changes (every 2.5s when tab is active)
+    // Background fallback poll for desktop clipboard changes (only when WebSocket is disconnected)
     setInterval(() => {
-        if (document.visibilityState === 'visible') {
+        if (!isSessionWsConnected && document.visibilityState === 'visible') {
             syncFromVncClipboard(false);
         }
-    }, 2500);
+    }, 5000);
 
     // Flush any pending desktop clipboard writes whenever the candidate interacts with the page
     // (A genuine user gesture guarantees browser permission for navigator.clipboard.writeText)
@@ -178,9 +222,10 @@ function renderMarkdown(content) {
     return tempDiv.innerHTML;
 }
 
-// Universal VNC clipboard synchronizer (Web postMessage + X11 server sync)
+// Universal VNC clipboard synchronizer (Web postMessage + WebSocket + X11 server sync)
 window.syncTextToVnc = function (text) {
     if (!text) return;
+    lastKnownHostClipboard = text.trim();
 
     // 1. Post to noVNC iframe
     const frame = document.getElementById('desktopFrame');
@@ -190,7 +235,15 @@ window.syncTextToVnc = function (text) {
         } catch (_) {}
     }
 
-    // 2. Direct fast non-blocking update to server X11 display :1
+    // 2. Direct real-time publish via WebSocket if connected
+    if (sessionSocket && sessionSocket.readyState === WebSocket.OPEN) {
+        try {
+            sessionSocket.send(JSON.stringify({ type: 'clipboard_copy', text: text }));
+            return;
+        } catch (_) {}
+    }
+
+    // 3. Direct fast non-blocking fallback update to server X11 display :1
     fetch('/api/clipboard', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -392,10 +445,16 @@ async function loadSession() {
         const wsDropdown = document.getElementById('workspaceDropdown');
         if (wsDropdown) wsDropdown.style.display = 'inline-block';
 
+        const recDropdownItem = document.getElementById('dropdownRecordingsItem');
+        if (recDropdownItem) recDropdownItem.style.display = isAdminUser ? 'flex' : 'none';
+
         if (data.active && data.current_task) {
             currentSession = data;
             updateUIWithSession(data);
             initTimer(data.time_remaining_seconds, data);
+            if (data.session_id) {
+                initSessionWebSocket(data.session_id);
+            }
             // If candidate rejoins active session without fullscreen, prompt immediately
             if (!isAdminUser && !document.fullscreenElement) {
                 showFullscreenWarning();
@@ -426,6 +485,8 @@ function renderStartScreen(lockedPreset, isAdmin) {
     document.getElementById('btnOpenDrawer').style.display = 'none';
     const wsDropdown = document.getElementById('workspaceDropdown');
     if (wsDropdown) wsDropdown.style.display = 'inline-block';
+    const recDropdownItem = document.getElementById('dropdownRecordingsItem');
+    if (recDropdownItem) recDropdownItem.style.display = isAdmin ? 'flex' : 'none';
     document.getElementById('btnFlagTask').style.display = 'none';
     document.getElementById('btnSubmitExam').style.display = 'none';
 
@@ -505,6 +566,9 @@ async function startAssignedExam(presetFilename) {
         currentSession = data;
         updateUIWithSession(data);
         initTimer(data.time_remaining_seconds, data);
+        if (data.session_id) {
+            initSessionWebSocket(data.session_id);
+        }
     } catch (err) {
         alert(`Failed to start exam: ${err.message}`);
     } finally {
@@ -534,6 +598,8 @@ function updateUIWithSession(data) {
     // Admin-only buttons
     const adminEndBtn = document.getElementById('btnAdminEndExam');
     const adminResetBtn = document.getElementById('btnAdminResetExam');
+    const recDropdownItem = document.getElementById('dropdownRecordingsItem');
+    if (recDropdownItem) recDropdownItem.style.display = isAdminUser ? 'flex' : 'none';
     if (isAdminUser) {
         if (adminEndBtn) adminEndBtn.style.display = 'inline-flex';
         if (adminResetBtn) adminResetBtn.style.display = 'inline-flex';
@@ -1305,6 +1371,11 @@ window.adminResetExam = async function () {
         if (adminEndBtn) adminEndBtn.style.display = 'none';
         if (adminResetBtn) adminResetBtn.style.display = 'none';
         currentSession = null;
+        if (sessionSocket) {
+            try { sessionSocket.close(); } catch (_) {}
+            sessionSocket = null;
+            isSessionWsConnected = false;
+        }
         if (timerInterval) clearInterval(timerInterval);
         if (timerSyncInterval) clearInterval(timerSyncInterval);
         targetEndTimestamp = null;
@@ -1528,4 +1599,480 @@ window.openModal = function (modalId) {
 window.closeModal = function (modalId) {
     const m = document.getElementById(modalId);
     if (m) m.style.display = 'none';
+};
+
+/* ==========================================================================
+   Candidate Session Recording & Post-Exam Review Replay Engine
+   ========================================================================== */
+
+let replayTerm = null;
+let replayFitAddon = null;
+let replayFrames = [];
+let replayDuration = 0;
+let replayCurrentTime = 0;
+let replayIsPlaying = false;
+let replaySpeed = 1.0;
+let replayAnimFrameId = null;
+let replayLastFrameTime = null;
+let replayNextEventIndex = 0;
+let replayActiveSessionData = null;
+let replayCurrentTab = 'timeline';
+
+window.openRecordingsModal = async function () {
+    openModal('modalRecordings');
+    const tbody = document.getElementById('recordingsTableBody');
+    if (!tbody) return;
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding: 24px; color: #94a3b8;">Loading candidate recordings...</td></tr>';
+
+    try {
+        const res = await fetch('/api/recordings');
+        const data = await res.json();
+        const recs = data.recordings || [];
+        if (recs.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding: 24px; color: #94a3b8;">No candidate session recordings found yet. Complete or submit an exam drill to generate recordings.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = recs.map(r => {
+            const sid = r.session_id;
+            const name = r.name || 'Mock Exam';
+            const date = r.started_at ? r.started_at.substring(0, 19).replace('T', ' ') : 'Unknown';
+            const dur = r.duration_formatted || (r.duration_seconds ? formatDurationSeconds(r.duration_seconds) : '--:--');
+            const pct = r.percentage !== null && r.percentage !== undefined ? `${r.percentage}%` : '--';
+            let statusBadge = '<span class="badge" style="background:#b45309;color:#fff;">In Progress</span>';
+            if (r.passed === true) {
+                statusBadge = '<span class="badge badge-success">Passed</span>';
+            } else if (r.passed === false) {
+                statusBadge = '<span class="badge badge-danger">Failed</span>';
+            }
+
+            return `
+                <tr>
+                    <td style="font-family: var(--font-code); font-weight: 600; color: #38bdf8;">${sid}</td>
+                    <td>${name}</td>
+                    <td style="color: #94a3b8;">${date}</td>
+                    <td>${dur}</td>
+                    <td style="font-weight: 600;">${pct}</td>
+                    <td>${statusBadge}</td>
+                    <td>
+                        <button class="btn-table-action" onclick="closeModal('modalRecordings'); openReviewModal('${sid}')">Review & Replay</button>
+                        ${r.has_cast ? `<a class="btn-table-action" href="/api/recordings/${sid}/cast" download="${sid}.cast">.cast</a>` : ''}
+                        ${r.has_events ? `<a class="btn-table-action" href="/api/recordings/${sid}/events" download="${sid}.events.json">Events</a>` : ''}
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding: 24px; color: #ef4444;">Failed to load recordings: ${e.message}</td></tr>`;
+    }
+};
+
+window.openReviewForCurrentSession = function () {
+    if (currentSession && currentSession.session_id) {
+        closeModal('modalScorecard');
+        openReviewModal(currentSession.session_id);
+    }
+};
+
+window.openReviewModal = async function (sessionId) {
+    openModal('modalReview');
+    initReplayTerminal();
+
+    const titleEl = document.getElementById('reviewModalTitle');
+    const subEl = document.getElementById('reviewModalSubtitle');
+    const btnCast = document.getElementById('btnDownloadCast');
+    const btnEvents = document.getElementById('btnDownloadEvents');
+
+    titleEl.innerText = `Candidate Session Review: ${sessionId}`;
+    subEl.innerText = 'Loading session data, timeline, and terminal recording...';
+
+    btnCast.href = `/api/recordings/${sessionId}/cast`;
+    btnCast.download = `${sessionId}.cast`;
+    btnCast.style.display = 'inline-flex';
+
+    btnEvents.href = `/api/recordings/${sessionId}/events`;
+    btnEvents.download = `${sessionId}.events.json`;
+    btnEvents.style.display = 'inline-flex';
+
+    pauseReplay();
+
+    try {
+        const [detailRes, castRes] = await Promise.all([
+            fetch(`/api/recordings/${sessionId}`),
+            fetch(`/api/recordings/${sessionId}/cast`)
+        ]);
+
+        if (!detailRes.ok) throw new Error('Could not fetch session metadata');
+        const sessionData = await detailRes.json();
+        replayActiveSessionData = sessionData;
+
+        const dur = sessionData.duration_formatted || formatDurationSeconds(sessionData.duration_seconds || 0);
+        const scoreStr = sessionData.percentage !== null && sessionData.percentage !== undefined ? `${sessionData.percentage}%` : 'In Progress';
+        const stText = sessionData.passed === true ? 'PASSED' : (sessionData.passed === false ? 'FAILED' : 'IN PROGRESS');
+        subEl.innerText = `Exam: ${sessionData.name} | Result: ${stText} (${scoreStr}) | Duration: ${dur} | Total Events: ${sessionData.events_count}`;
+
+        renderReviewSidebar();
+
+        if (castRes.ok) {
+            const castText = await castRes.text();
+            parseCastRecording(castText);
+        } else {
+            replayFrames = [];
+            replayDuration = sessionData.duration_seconds || 60;
+        }
+
+        seekReplay(0);
+    } catch (e) {
+        subEl.innerText = `Error loading session: ${e.message}`;
+    }
+};
+
+function initReplayTerminal() {
+    if (replayTerm) {
+        replayTerm.reset();
+        if (replayFitAddon) {
+            setTimeout(() => replayFitAddon.fit(), 50);
+        }
+        return;
+    }
+    const container = document.getElementById('replayTerminalContainer');
+    if (!container || !window.Terminal) return;
+
+    replayTerm = new Terminal({
+        cursorBlink: false,
+        fontFamily: "'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+        fontSize: 13,
+        lineHeight: 1.2,
+        theme: {
+            background: '#090d14',
+            foreground: '#f1f5f9',
+            cursor: '#38bdf8',
+            selectionBackground: '#334155',
+            black: '#000000',
+            red: '#ef4444',
+            green: '#10b981',
+            yellow: '#f59e0b',
+            blue: '#3b82f6',
+            magenta: '#a855f7',
+            cyan: '#06b6d4',
+            white: '#f1f5f9',
+        }
+    });
+
+    if (window.FitAddon && window.FitAddon.FitAddon) {
+        replayFitAddon = new FitAddon.FitAddon();
+        replayTerm.loadAddon(replayFitAddon);
+    }
+
+    replayTerm.open(container);
+    setTimeout(() => {
+        if (replayFitAddon) replayFitAddon.fit();
+    }, 100);
+}
+
+function parseCastRecording(castText) {
+    const lines = castText.split('\n');
+    replayFrames = [];
+    replayDuration = 0;
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+        if (i === 0 && line.startsWith('{')) {
+            continue;
+        }
+
+        try {
+            const frame = JSON.parse(line);
+            if (Array.isArray(frame) && frame.length >= 3) {
+                const relTime = parseFloat(frame[0]);
+                const type = frame[1];
+                const content = frame[2];
+                replayFrames.push({ time: relTime, type, content });
+                if (relTime > replayDuration) {
+                    replayDuration = relTime;
+                }
+            }
+        } catch (_) {}
+    }
+
+    if (replayDuration <= 0 && replayActiveSessionData && replayActiveSessionData.duration_seconds) {
+        replayDuration = replayActiveSessionData.duration_seconds;
+    }
+
+    const scrubber = document.getElementById('replayScrubber');
+    if (scrubber) scrubber.max = Math.max(1, replayDuration);
+    updateReplayTimeDisplay();
+}
+
+function renderReviewSidebar() {
+    const container = document.getElementById('reviewSidebarContent');
+    const countEl = document.getElementById('reviewEventCount');
+    if (!container || !replayActiveSessionData) return;
+
+    if (replayCurrentTab === 'timeline') {
+        const events = replayActiveSessionData.events || [];
+        countEl.innerText = `${events.length} events`;
+        if (events.length === 0) {
+            container.innerHTML = '<div style="padding: 16px; color: #94a3b8; font-size: 0.82rem;">No events logged for this session.</div>';
+            return;
+        }
+
+        container.innerHTML = `
+            <div class="timeline-list">
+                ${events.map((evt) => {
+                    const time = evt.rel_time_formatted || formatDurationSeconds(evt.rel_time || 0);
+                    const etype = evt.event;
+                    const data = evt.data || {};
+                    let badgeClass = 'badge-copy';
+                    let desc = '';
+
+                    if (etype === 'SESSION_START') {
+                        badgeClass = 'badge-task';
+                        desc = `Exam started: ${data.name || 'Mock Exam'}`;
+                    } else if (etype === 'TASK_DEPLOYED') {
+                        badgeClass = 'badge-task';
+                        desc = `Task ${data.task_num}: [${data.question_id}] ${data.title || ''}`;
+                    } else if (etype === 'TASK_FLAGGED') {
+                        badgeClass = 'badge-flag';
+                        desc = `🚩 Flagged Task ${data.task_num} (${data.question_id})`;
+                    } else if (etype === 'TASK_UNFLAGGED') {
+                        badgeClass = 'badge-flag';
+                        desc = `Unflagged Task ${data.task_num} (${data.question_id})`;
+                    } else if (etype === 'TASK_RETRY') {
+                        badgeClass = 'badge-flag';
+                        desc = `Reset/Retry Task ${data.task_num}`;
+                    } else if (etype === 'TASK_EVALUATION') {
+                        badgeClass = 'badge-eval';
+                        const st = data.passed ? 'PASS' : 'FAIL';
+                        desc = `Evaluated [${data.question_id}]: ${data.score}/${data.max_score} pts (${st})`;
+                    } else if (etype === 'EXAM_SUBMITTED') {
+                        badgeClass = 'badge-submit';
+                        desc = `Final Submission: ${data.percentage}% (${data.total_earned}/${data.total_possible} pts)`;
+                    } else if (etype === 'CLIPBOARD_COPY') {
+                        badgeClass = 'badge-copy';
+                        desc = `Copied snippet: "${(data.preview || '').substring(0, 30)}..."`;
+                    } else if (etype === 'TERMINAL_ATTACH') {
+                        badgeClass = 'badge-copy';
+                        desc = 'Candidate terminal connected';
+                    } else if (etype === 'BROWSER_NAVIGATE') {
+                        badgeClass = 'badge-task';
+                        const linkTitle = data.title || data.url || 'Documentation';
+                        desc = `🌐 Visited: <a href="${data.url}" target="_blank" rel="noopener noreferrer" style="color:#38bdf8;text-decoration:underline;">${linkTitle.substring(0, 48)}</a>`;
+                    } else if (etype === 'BROWSER_SEARCH') {
+                        badgeClass = 'badge-eval';
+                        desc = `🔍 Search: "${data.query || ''}" (${data.domain || 'web'})`;
+                    } else {
+                        badgeClass = 'badge-copy';
+                        desc = etype;
+                    }
+
+                    return `
+                        <div class="timeline-item" onclick="seekReplay(${evt.rel_time || 0})" data-time="${evt.rel_time || 0}">
+                            <div class="timeline-meta">
+                                <span class="timeline-time">${time}</span>
+                                <span class="timeline-badge ${badgeClass}">${etype.replace('TASK_', '')}</span>
+                            </div>
+                            <div class="timeline-desc">${desc}</div>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        `;
+    } else {
+        const tasks = replayActiveSessionData.task_timeline || [];
+        countEl.innerText = `${tasks.length} tasks`;
+        if (tasks.length === 0) {
+            container.innerHTML = '<div style="padding: 16px; color: #94a3b8; font-size: 0.82rem;">No task navigation recorded.</div>';
+            return;
+        }
+
+        container.innerHTML = `
+            <div class="timeline-list">
+                ${tasks.map(t => {
+                    const firstSeen = formatDurationSeconds(t.first_seen_time || 0);
+                    const sc = t.score !== null && t.score !== undefined ? `${t.score}/${t.max_score} pts` : 'Not graded';
+                    const stColor = t.passed ? '#10b981' : (t.passed === false ? '#ef4444' : '#94a3b8');
+
+                    return `
+                        <div class="timeline-item" onclick="seekReplay(${t.first_seen_time || 0})">
+                            <div class="timeline-meta">
+                                <span class="timeline-time">${firstSeen}</span>
+                                <span class="timeline-badge badge-task">Task ${t.task_num}</span>
+                            </div>
+                            <div style="font-weight: 600; color: #f1f5f9; font-size: 0.82rem;">[${t.question_id}] ${t.title}</div>
+                            <div style="font-size: 0.75rem; color: #94a3b8; display: flex; justify-content: space-between; margin-top: 4px;">
+                                <span>Context: <code>${t.context}</code></span>
+                                <span>Visits: ${t.visits}</span>
+                            </div>
+                            <div style="font-size: 0.75rem; color: ${stColor}; font-weight: 600; margin-top: 2px;">
+                                Score: ${sc} ${t.is_flagged ? '🚩 (Flagged)' : ''}
+                            </div>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        `;
+    }
+}
+
+window.switchReviewTab = function (tab) {
+    replayCurrentTab = tab;
+    const tabTl = document.getElementById('btnTabTimeline');
+    const tabTk = document.getElementById('btnTabTasks');
+    if (tabTl) tabTl.classList.toggle('active', tab === 'timeline');
+    if (tabTk) tabTk.classList.toggle('active', tab === 'tasks');
+    renderReviewSidebar();
+};
+
+window.toggleReplayPlayPause = function () {
+    if (replayIsPlaying) {
+        pauseReplay();
+    } else {
+        playReplay();
+    }
+};
+
+function playReplay() {
+    if (replayCurrentTime >= replayDuration) {
+        seekReplay(0);
+    }
+    replayIsPlaying = true;
+    replayLastFrameTime = performance.now();
+    const icon = document.getElementById('replayPlayIcon');
+    const btn = document.getElementById('btnReplayPlayPause');
+    if (icon) icon.innerText = '⏸ Pause';
+    if (btn) {
+        btn.classList.remove('primary');
+        btn.classList.add('active');
+    }
+    replayTick();
+}
+
+function pauseReplay() {
+    replayIsPlaying = false;
+    if (replayAnimFrameId) {
+        cancelAnimationFrame(replayAnimFrameId);
+        replayAnimFrameId = null;
+    }
+    const icon = document.getElementById('replayPlayIcon');
+    const btn = document.getElementById('btnReplayPlayPause');
+    if (icon) icon.innerText = '▶ Play';
+    if (btn) {
+        btn.classList.add('primary');
+        btn.classList.remove('active');
+    }
+}
+
+function replayTick() {
+    if (!replayIsPlaying) return;
+
+    const now = performance.now();
+    const deltaSeconds = ((now - replayLastFrameTime) / 1000) * replaySpeed;
+    replayLastFrameTime = now;
+
+    const nextTime = Math.min(replayDuration, replayCurrentTime + deltaSeconds);
+
+    while (replayNextEventIndex < replayFrames.length && replayFrames[replayNextEventIndex].time <= nextTime) {
+        const frame = replayFrames[replayNextEventIndex];
+        if (frame.type === 'o' && replayTerm) {
+            replayTerm.write(frame.content);
+        }
+        replayNextEventIndex++;
+    }
+
+    replayCurrentTime = nextTime;
+    const scrubber = document.getElementById('replayScrubber');
+    if (scrubber) scrubber.value = replayCurrentTime;
+    updateReplayTimeDisplay();
+
+    if (replayCurrentTime >= replayDuration) {
+        pauseReplay();
+        return;
+    }
+
+    replayAnimFrameId = requestAnimationFrame(replayTick);
+}
+
+window.seekReplay = function (targetTime) {
+    targetTime = Math.max(0, Math.min(replayDuration, targetTime));
+    replayCurrentTime = targetTime;
+    const scrubber = document.getElementById('replayScrubber');
+    if (scrubber) scrubber.value = targetTime;
+    updateReplayTimeDisplay();
+
+    if (replayTerm) {
+        replayTerm.reset();
+        replayNextEventIndex = 0;
+        for (let i = 0; i < replayFrames.length; i++) {
+            const f = replayFrames[i];
+            if (f.time <= targetTime) {
+                if (f.type === 'o') {
+                    replayTerm.write(f.content);
+                }
+                replayNextEventIndex = i + 1;
+            } else {
+                break;
+            }
+        }
+    }
+
+    highlightNearestTimelineItem(targetTime);
+};
+
+window.seekReplayRelative = function (offsetSec) {
+    seekReplay(replayCurrentTime + offsetSec);
+};
+
+window.restartReplay = function () {
+    seekReplay(0);
+    playReplay();
+};
+
+window.onScrubberInput = function (val) {
+    seekReplay(parseFloat(val));
+};
+
+window.onScrubberChange = function (val) {
+    seekReplay(parseFloat(val));
+};
+
+window.setReplaySpeed = function (speed) {
+    replaySpeed = parseFloat(speed) || 1.0;
+};
+
+function updateReplayTimeDisplay() {
+    const disp = document.getElementById('replayTimeDisplay');
+    if (disp) {
+        disp.innerText = `${formatDurationSeconds(replayCurrentTime)} / ${formatDurationSeconds(replayDuration)}`;
+    }
+}
+
+function highlightNearestTimelineItem(currentTime) {
+    const items = document.querySelectorAll('.timeline-item');
+    items.forEach(item => {
+        const t = parseFloat(item.getAttribute('data-time') || -1);
+        if (Math.abs(t - currentTime) < 15) {
+            item.classList.add('active');
+        } else {
+            item.classList.remove('active');
+        }
+    });
+}
+
+function formatDurationSeconds(secs) {
+    const s = Math.floor(secs || 0);
+    const mins = Math.floor(s / 60);
+    const remSec = s % 60;
+    const hrs = Math.floor(mins / 60);
+    const remMin = mins % 60;
+    if (hrs > 0) {
+        return `${String(hrs).padStart(2, '0')}:${String(remMin).padStart(2, '0')}:${String(remSec).padStart(2, '0')}`;
+    }
+    return `${String(remMin).padStart(2, '0')}:${String(remSec).padStart(2, '0')}`;
+}
+
+window.closeReviewModal = function () {
+    pauseReplay();
+    closeModal('modalReview');
 };

@@ -365,7 +365,70 @@ Every script, tool, question setup, and grader must adhere to the following prin
 
 ## 9. Next Phase Action Items & Milestones
 
-- [ ] **Milestone 1**: Complete scan of all 111 `questions/*/setup.sh` and `grader.py` files to replace legacy IP fallbacks with dynamic `${NODE_1}` / `node1` aliases.
-- [ ] **Milestone 2**: Build `./labctl configure` interactive CLI wizard to automate `.env` generation and cluster preflight checks.
-- [ ] **Milestone 3**: Implement candidate session recording (asciinema terminal recording + event logging) for post-exam review.
+- [x] **Milestone 1**: Complete scan of all 111 `questions/*/setup.sh` and `grader.py` files to replace legacy IP fallbacks with dynamic `${NODE_1}` / `node1` aliases. (Completed)
+- [x] **Milestone 2**: Build `./labctl configure` interactive CLI wizard to automate `.env` generation and cluster preflight checks. (Completed)
+- [x] **Milestone 3**: Implement candidate session recording (asciinema terminal recording + event logging) for post-exam review. (Completed)
 - [ ] **Milestone 4**: Containerized student sandboxing option (running the platform inside an isolated Docker container with DinD for zero-friction laptop deployment).
+
+---
+
+## 10. Phase 3 Architecture: Redis Integration & Multi-Session Concurrency (Roadmap)
+
+### 10.1 Motivation & Current Limitations
+The current platform operates as a single-tenant system:
+- **Clipboard Polling Overhead**: The frontend triggers `GET /api/clipboard` every 2.5 seconds via `setInterval`. Each request executes host subprocesses (`xsel -b -o`), wasting CPU cycles and introducing sync lag.
+- **Single Active Session Constraint**: State is bound to a single file (`var/session.json`) and shared namespaces on `k3d-cka`. Only one exam session can run at any given moment.
+- **File I/O Contention**: Session updates, evaluation writes, and event logging contend on local JSON/JSONL files on disk.
+
+### 10.2 Architectural Redesign with Redis
+
+```
+                                +-----------------------------+
+                                |      FastAPI Web App        |
+                                |  WebSocket Handler & Engine |
+                                +--------------+--------------+
+                                               |
+                     +-------------------------+-------------------------+
+                     | Pub/Sub & Streams                                 | Key-Value / Hashes
+                     v                                                   v
+      +-----------------------------+                     +-----------------------------+
+      |      Redis Pub/Sub          |                     |         Redis Data          |
+      |  - clipboard:{session_id}   |                     |  - session:{id}:state       |
+      |  - timer:{session_id}       |                     |  - session:{id}:scores      |
+      |  - events:{session_id}      |                     |  - active_sessions (Set)    |
+      +--------------+--------------+                     +-----------------------------+
+                     |
+         +-----------+-----------+
+         |                       |
+         v                       v
++-----------------+     +-----------------+
+| Candidate WebUI |     | Proctor Monitor |
+|   (WebSocket)   |     |   (Real-Time)   |
++-----------------+     +-----------------+
+```
+
+### 10.3 Key Improvements, Additions, and Removals
+
+1. **Replace Clipboard HTTP Polling with WebSocket + Redis Pub/Sub**:
+   - **Remove**: The recurring client-side `setInterval` polling `GET /api/clipboard`.
+   - **Introduce**: A unified WebSocket connection (`/ws/session/{session_id}`).
+   - **Publish**: When host X11 clipboard or candidate web clipboard changes, publish directly to channel `clipboard:{session_id}`.
+   - **Deliver**: Zero-latency push delivery to connected clients without continuous process spawns.
+
+2. **Server-Authoritative Timer & Event Broadcasting**:
+   - **Remove**: Client-side timer drift and frequent status polling requests.
+   - **Introduce**: Redis key `session:{session_id}:timer` with authoritative start/end timestamps and TTL. Background task publishes heartbeats or milestone events (`timer:{session_id}`: e.g., 30m, 15m, 5m warnings, expiration).
+
+3. **Multi-Session Support (Simultaneous Multi-User Exams)**:
+   - **Session State Partitioning**: Transition from static `var/session.json` to Redis hashes: `session:{session_id}` and `sessions:active`.
+   - **Cluster Resource Namespacing**:
+     - Prepend `session_id` or tenant identifier to namespaces (e.g., `s1788-web-services`), or provision lightweight isolated vclusters (`vcluster create exam-{session_id}`).
+   - **Dynamic Terminal & Display Port Allocation**:
+     - Allocate dynamic web terminal PTY instances and TigerVNC/noVNC display ports (`5900 + N`, `6080 + N`) tracked in Redis sets.
+   - **Candidate Sandbox Isolation**:
+     - Map candidates to containerized runner pods or ephemeral Linux sandbox users.
+
+4. **Telemetry & Real-Time Proctoring (Redis Streams)**:
+   - Stream candidate events (`TASK_DEPLOYED`, `TASK_EVALUATION`, `TERMINAL_ATTACH`, `BROWSER_NAVIGATE`) via Redis Streams (`XADD exam:stream:{session_id} * ...`).
+   - Enables real-time multi-candidate proctor dashboards, live score aggregation, and replay archiving with zero disk I/O contention.
+
