@@ -33,6 +33,37 @@ except Exception as e:
 PYEOF
 
 chmod 600 /home/exam/.kube/config 2>/dev/null || true
+
+# Pre-seed Firefox profile to eliminate welcome screens, onboarding, and bloat
+mkdir -p /home/exam/.mozilla/firefox/default.profile
+cat << 'PREFS' > /home/exam/.mozilla/firefox/default.profile/prefs.js
+user_pref("browser.startup.homepage", "https://kubernetes.io/docs/home/");
+user_pref("browser.startup.page", 1);
+user_pref("browser.aboutwelcome.enabled", false);
+user_pref("datareporting.policy.dataSubmissionEnabled", false);
+user_pref("toolkit.telemetry.reportingpolicy.firstRun", false);
+user_pref("trailhead.firstrun.didSeeAboutWelcome", true);
+user_pref("browser.newtabpage.enabled", false);
+user_pref("browser.newtabpage.activity-stream.feeds.section.topstories", false);
+user_pref("browser.newtabpage.activity-stream.feeds.snippets", false);
+user_pref("browser.newtabpage.activity-stream.feeds.topsites", false);
+user_pref("browser.newtabpage.activity-stream.showSponsored", false);
+user_pref("browser.newtabpage.activity-stream.showSponsoredTopSites", false);
+user_pref("browser.toolbars.bookmarks.visibility", "always");
+PREFS
+
+cat << 'PROFILES' > /home/exam/.mozilla/firefox/profiles.ini
+[Profile0]
+Name=default
+IsRelative=1
+Path=default.profile
+Default=1
+
+[General]
+StartWithLastProfile=1
+Version=2
+PROFILES
+
 chown -R exam:exam /home/exam
 
 # Configure xstartup for XFCE4
@@ -64,11 +95,11 @@ websockify --web=/usr/share/novnc 6080 localhost:5901 &
 su - exam -c "DISPLAY=:1 SESSION_ID='${SESSION_ID:-default}' REDIS_HOST='${REDIS_HOST:-172.17.0.1}' REDIS_PORT='${REDIS_PORT:-6379}' /usr/local/bin/desk-agent.py" &
 AGENT_PID=$!
 
-# Launch XFCE Terminal & Firefox as user exam
+# Launch XFCE Terminal & Firefox with Kubernetes Docs as user exam
 su - exam -c "DISPLAY=:1 xfce4-terminal" &
 TERM_PID=$!
 
-su - exam -c "DISPLAY=:1 firefox-esr" &
+su - exam -c "DISPLAY=:1 firefox-esr https://kubernetes.io/docs/home/" &
 FIREFOX_PID=$!
 
 _shutdown() {

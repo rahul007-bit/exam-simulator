@@ -2,13 +2,37 @@
   "policies": {
     "DisableAppUpdate": true,
     "DisableTelemetry": true,
-    "OverrideFirstRunPage": "",
-    "OverridePostUpdatePage": "",
+    "DisableFirefoxStudies": true,
+    "DisablePocket": true,
+    "DisableFirefoxAccounts": true,
+    "DisableDefaultBrowserAgent": true,
     "DontCheckDefaultBrowser": true,
+    "OverrideFirstRunPage": "https://kubernetes.io/docs/home/",
+    "OverridePostUpdatePage": "",
+    "DisplayBookmarksToolbar": "always",
     "Homepage": {
       "URL": "https://kubernetes.io/docs/home/",
-      "Locked": false,
+      "Locked": true,
       "StartPage": "homepage"
+    },
+    "NewTabPage": false,
+    "UserMessaging": {
+      "WhatsNew": false,
+      "ExtensionRecommendations": false,
+      "FeatureRecommendations": false,
+      "UrlbarInterventions": false,
+      "SkipOnboarding": true,
+      "MoreFromMozilla": false
+    },
+    "FirefoxHome": {
+      "Search": false,
+      "TopSites": false,
+      "SponsoredTopSites": false,
+      "Highlights": false,
+      "Pocket": false,
+      "SponsoredPocket": false,
+      "Snippets": false,
+      "Locked": true
     },
     "Bookmarks": [
       {

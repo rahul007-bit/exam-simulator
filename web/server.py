@@ -768,6 +768,40 @@ async def terminal_websocket(websocket: WebSocket):
 
     pid, master_fd = pty.fork()
     if pid == 0:
+        is_admin_mode = os.getenv("EXAM_ADMIN", "0").lower() in ("1", "true")
+        container_name = f"cka-desktop-{sid}"
+        use_container = False
+        if not is_admin_mode and desktop_mgr.is_docker_available():
+            try:
+                r = subprocess.run(
+                    ["docker", "inspect", "-f", "{{.State.Running}}", container_name],
+                    capture_output=True,
+                    text=True,
+                    timeout=1,
+                )
+                if r.returncode == 0 and "true" in r.stdout.lower():
+                    use_container = True
+            except Exception:
+                pass
+
+        if use_container:
+            try:
+                os.setpgid(0, 0)
+                termios.tcsetpgrp(0, os.getpgrp())
+            except Exception:
+                pass
+            docker_cmd = [
+                "docker", "exec", "-it",
+                "-u", "exam",
+                "-e", "TERM=xterm-256color",
+                "-e", "COLORTERM=truecolor",
+                "-e", "EXAM_RECORDED=1",
+                "-e", "WEB_TERMINAL=1",
+                container_name,
+                "bash", "-l",
+            ]
+            os.execvp("docker", docker_cmd)
+
         target_user = os.getenv("EXAM_USER", "exam")
         try:
             import pwd

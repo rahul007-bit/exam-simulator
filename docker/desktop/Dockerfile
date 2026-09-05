@@ -56,6 +56,8 @@ RUN echo "if [ -f /usr/share/bash-completion/bash_completion ]; then . /usr/shar
 
 # Install Firefox CKA policies and bookmarks
 COPY policies.json /etc/firefox-esr/policies/policies.json
+RUN mkdir -p /usr/lib/firefox-esr/distribution && \
+    cp /etc/firefox-esr/policies/policies.json /usr/lib/firefox-esr/distribution/policies.json
 
 # Copy desk-agent and entrypoint
 COPY desk-agent.py /usr/local/bin/desk-agent.py
