@@ -1,0 +1,41 @@
+{
+  "policies": {
+    "DisableAppUpdate": true,
+    "DisableTelemetry": true,
+    "OverrideFirstRunPage": "",
+    "OverridePostUpdatePage": "",
+    "DontCheckDefaultBrowser": true,
+    "Homepage": {
+      "URL": "https://kubernetes.io/docs/home/",
+      "Locked": false,
+      "StartPage": "homepage"
+    },
+    "Bookmarks": [
+      {
+        "Title": "Kubernetes Documentation",
+        "URL": "https://kubernetes.io/docs/home/",
+        "Placement": "toolbar"
+      },
+      {
+        "Title": "Kubectl Cheat Sheet",
+        "URL": "https://kubernetes.io/docs/reference/kubectl/cheatsheet/",
+        "Placement": "toolbar"
+      },
+      {
+        "Title": "Kubernetes Tasks",
+        "URL": "https://kubernetes.io/docs/tasks/",
+        "Placement": "toolbar"
+      },
+      {
+        "Title": "Helm Documentation",
+        "URL": "https://helm.sh/docs/",
+        "Placement": "toolbar"
+      },
+      {
+        "Title": "Kubernetes Blog",
+        "URL": "https://kubernetes.io/blog/",
+        "Placement": "toolbar"
+      }
+    ]
+  }
+}

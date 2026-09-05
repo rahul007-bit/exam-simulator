@@ -25,6 +25,7 @@ from core.grader import LabGrader
 from core.models import ExamSession, Question, GradeResult
 from core.recorder import recorder
 from core.redis_bus import bus as redis_bus
+from core.desktop_manager import desktop_mgr
 
 app = FastAPI(title="Kubernetes Exam Web Simulator", version="2.0.0")
 
@@ -602,8 +603,11 @@ def action_submit():
             total_earned=total_earned,
             total_possible=total_possible,
         )
-    except Exception as ex:
-        print(f"[Warning] Failed to finalize recording: {ex}")
+    try:
+        if session and session.session_id:
+            desktop_mgr.stop_desktop(session.session_id)
+    except Exception:
+        pass
 
     return report_data
 
@@ -715,11 +719,17 @@ def start_exam(req: StartRequest, request: Request):
             time_limit_minutes=preset_data.get("time_limit_minutes", 120),
         )
 
+    if session and session.session_id:
+        desktop_mgr.start_desktop(session.session_id)
+
     return get_session(request)
 
 
 @app.post("/api/reset")
 def reset_exam():
+    active_session = deployer.load_active_session(loader)
+    if active_session and active_session.session_id:
+        desktop_mgr.stop_desktop(active_session.session_id)
     deployer.clear_session(cleanup_cluster=True)
     return {"status": "ok", "message": "Exam session cleared and cluster cleaned"}
 
@@ -880,17 +890,25 @@ async def terminal_websocket(websocket: WebSocket):
 
 # --- Integrated noVNC WebSocket Proxy ---
 
-async def _proxy_vnc(websocket: WebSocket):
+async def _proxy_vnc(websocket: WebSocket, session_id: Optional[str] = None):
     requested_proto = websocket.headers.get("sec-websocket-protocol", "")
     subprotocol = "binary" if "binary" in requested_proto else None
     await websocket.accept(subprotocol=subprotocol)
-    print(f"[VNC Proxy] Client connected from {websocket.client}. Subprotocol: {subprotocol}")
+
+    target_host = "127.0.0.1"
+    target_port = 5901
+
+    if session_id:
+        desktop_info = redis_bus.get_desktop_info(session_id)
+        if desktop_info and "host" in desktop_info:
+            target_host = desktop_info["host"]
+            target_port = int(desktop_info.get("vnc_port", 5901))
 
     try:
-        reader, writer = await asyncio.open_connection("127.0.0.1", 5901)
-        print("[VNC Proxy] Connected to TigerVNC on 127.0.0.1:5901")
+        reader, writer = await asyncio.open_connection(target_host, target_port)
+        print(f"[VNC Proxy] Connected to VNC at {target_host}:{target_port} (session: {session_id or 'default'})")
     except Exception as e:
-        print(f"[VNC Proxy] Failed to connect to TigerVNC: {e}")
+        print(f"[VNC Proxy] Failed to connect to VNC target {target_host}:{target_port}: {e}")
         await websocket.close()
         return
 
@@ -899,7 +917,6 @@ async def _proxy_vnc(websocket: WebSocket):
             while True:
                 msg = await websocket.receive()
                 if msg.get("type") == "websocket.disconnect":
-                    print("[VNC Proxy] Client sent websocket.disconnect")
                     break
                 if "bytes" in msg and msg["bytes"]:
                     writer.write(msg["bytes"])
@@ -907,8 +924,8 @@ async def _proxy_vnc(websocket: WebSocket):
                 elif "text" in msg and msg["text"]:
                     writer.write(msg["text"].encode("latin1"))
                     await writer.drain()
-        except Exception as e:
-            print(f"[VNC Proxy] client_to_vnc exception: {e}")
+        except Exception:
+            pass
         finally:
             try:
                 writer.close()
@@ -920,11 +937,10 @@ async def _proxy_vnc(websocket: WebSocket):
             while True:
                 data = await reader.read(16384)
                 if not data:
-                    print("[VNC Proxy] TigerVNC closed reader connection (EOF)")
                     break
                 await websocket.send_bytes(data)
-        except Exception as e:
-            print(f"[VNC Proxy] vnc_to_client exception: {e}")
+        except Exception:
+            pass
         finally:
             try:
                 await websocket.close()
@@ -946,7 +962,11 @@ async def _proxy_vnc(websocket: WebSocket):
         await writer.wait_closed()
     except Exception:
         pass
-    print("[VNC Proxy] Session finished cleanly.")
+
+
+@app.websocket("/ws/desktop/{session_id}")
+async def vnc_ws_dynamic_desktop(websocket: WebSocket, session_id: str):
+    await _proxy_vnc(websocket, session_id=session_id)
 
 
 @app.websocket("/ws/vnc")

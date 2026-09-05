@@ -132,6 +132,7 @@ class SessionRecorder:
 
         # Start background browser history tracker (Option 1)
         self._start_browser_tracker(candidate_user=candidate)
+        self._start_redis_event_subscriber(session_id)
 
     def attach_or_resume(self, session_id: str, name: str = "CKA Exam Session") -> None:
         """Attaches to an existing recording or initializes it if not started."""
@@ -177,6 +178,7 @@ class SessionRecorder:
             self._events_fp = open(self.events_file, "a", encoding="utf-8", buffering=1)
             self._active = True
             self._start_browser_tracker(candidate_user=os.getenv("EXAM_USER", "exam"))
+            self._start_redis_event_subscriber(session_id)
 
     def _get_rel_time(self) -> float:
         if not self.start_timestamp:
@@ -352,6 +354,7 @@ class SessionRecorder:
 
     def _close_files_locked(self) -> None:
         self._stop_browser_tracker()
+        self._stop_redis_event_subscriber()
         if self._cast_fp:
             try:
                 self._cast_fp.flush()
@@ -407,6 +410,55 @@ class SessionRecorder:
             self._check_browser_history(candidate_user)
         except Exception:
             pass
+
+    def _start_redis_event_subscriber(self, session_id: str) -> None:
+        """Starts background subscriber for desktop Redis events:{session_id}."""
+        if hasattr(self, "_redis_sub_thread") and self._redis_sub_thread and self._redis_sub_thread.is_alive():
+            return
+
+        if not hasattr(self, "_redis_stop_event"):
+            self._redis_stop_event = threading.Event()
+        self._redis_stop_event.clear()
+
+        def _sub_loop():
+            try:
+                from core.redis_bus import bus as rbus
+                client = rbus.get_sync_client()
+                if not client:
+                    return
+                pubsub = client.pubsub()
+                channel = f"events:{session_id}"
+                pubsub.subscribe(channel)
+
+                while not self._redis_stop_event.is_set():
+                    try:
+                        msg = pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                        if msg and msg.get("type") == "message":
+                            raw = msg.get("data", "")
+                            if isinstance(raw, bytes):
+                                raw = raw.decode("utf-8", errors="replace")
+                            payload = json.loads(raw)
+                            event_type = payload.pop("event", "DESKTOP_EVENT")
+                            self.log_event(event_type, payload)
+                    except Exception:
+                        time.sleep(1.0)
+            except Exception:
+                pass
+
+        self._redis_sub_thread = threading.Thread(target=_sub_loop, daemon=True, name=f"RedisSub-{session_id}")
+        self._redis_sub_thread.start()
+
+    def _stop_redis_event_subscriber(self) -> None:
+        """Stops the Redis event subscriber thread."""
+        if hasattr(self, "_redis_stop_event"):
+            self._redis_stop_event.set()
+        t = getattr(self, "_redis_sub_thread", None)
+        self._redis_sub_thread = None
+        if t and t.is_alive():
+            try:
+                t.join(timeout=1.0)
+            except Exception:
+                pass
 
     def _find_places_db(self, candidate_user: str = "exam") -> Optional[Path]:
         """Discovers active Firefox places.sqlite profile database."""

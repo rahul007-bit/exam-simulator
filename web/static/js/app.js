@@ -1361,20 +1361,18 @@ window.switchWorkspaceTab = function (tab) {
         if (termContainer) termContainer.classList.remove('active-frame');
         requestKeyboardLock();
 
-        const host = window.location.hostname || '10.8.0.15';
-        const port = (currentSession && currentSession.novnc_port) || '6080';
-        const vncUrl = `http://${host}:${port}/vnc.html?autoconnect=true&resize=remote&reconnect=true`;
-        if (vncFrame && (!vncFrame.src || vncFrame.src === 'about:blank' || !vncFrame.src.includes(`:${port}/`))) {
-            console.log('[VNC] Setting iframe src to:', vncUrl);
+        const sid = (currentSession && currentSession.session_id) || 'active';
+        const vncUrl = `/novnc/vnc.html?autoconnect=true&resize=remote&reconnect=true&path=ws/desktop/${encodeURIComponent(sid)}`;
+        if (vncFrame && (!vncFrame.src || vncFrame.src === 'about:blank' || !vncFrame.src.includes('/novnc/'))) {
+            console.log('[VNC] Setting iframe src to dynamic ingress:', vncUrl);
             vncFrame.src = vncUrl;
         }
     }
 };
 
 window.openDesktopInNewTab = function () {
-    const host = window.location.hostname || 'localhost';
-    const port = (currentSession && currentSession.novnc_port) || '6080';
-    window.open(`http://${host}:${port}/vnc.html?autoconnect=true&resize=remote&reconnect=true`, '_blank');
+    const sid = (currentSession && currentSession.session_id) || 'active';
+    window.open(`/novnc/vnc.html?autoconnect=true&resize=remote&reconnect=true&path=ws/desktop/${encodeURIComponent(sid)}`, '_blank');
 };
 
 window.toggleWorkspaceDropdown = function (event) {

@@ -272,7 +272,51 @@ class RedisBus:
                 client.delete(f"session:{sid}")
                 client.delete(f"clipboard:{sid}")
                 client.delete(f"terminal:buffer:{sid}")
+                client.delete(f"desktop:{sid}")
             client.delete("session:active:id")
+        except Exception:
+            pass
+
+    # --- Desktop Registration & Dynamic Ingress ---
+
+    def set_desktop_info(self, session_id: str, host: str, vnc_port: int = 5901, ws_port: int = 6080, container_id: str = "") -> bool:
+        """Stores desktop endpoint info for dynamic routing."""
+        if not self.is_available():
+            return False
+        try:
+            client = self.get_sync_client()
+            data = {
+                "host": host,
+                "vnc_port": str(vnc_port),
+                "ws_port": str(ws_port),
+                "container_id": container_id,
+            }
+            client.hset(f"desktop:{session_id}", mapping=data)
+            client.expire(f"desktop:{session_id}", 86400)
+            return True
+        except Exception:
+            return False
+
+    def get_desktop_info(self, session_id: str) -> Optional[Dict[str, str]]:
+        """Retrieves desktop endpoint info from Redis."""
+        if not self.is_available():
+            return None
+        try:
+            client = self.get_sync_client()
+            data = client.hgetall(f"desktop:{session_id}")
+            if data:
+                return {k.decode() if isinstance(k, bytes) else k: v.decode() if isinstance(v, bytes) else v for k, v in data.items()}
+            return None
+        except Exception:
+            return None
+
+    def clear_desktop_info(self, session_id: str) -> None:
+        """Removes desktop routing info from Redis."""
+        if not self.is_available():
+            return
+        try:
+            client = self.get_sync_client()
+            client.delete(f"desktop:{session_id}")
         except Exception:
             pass
 
