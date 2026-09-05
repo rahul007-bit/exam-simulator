@@ -147,41 +147,112 @@ Question `CA-006-kubeadm-token-node-join` requires an unjoined node where the ca
 
 ## 7. Dynamic Remote Desktop (VNC / KasmVNC) per Candidate
 
-### 7.1 Architecture: Ephemeral Containerized Desktops
-Instead of running a host-level X11 display, spawn an isolated desktop container per session:
-```bash
-docker run -d \
-  --name desktop-sess-101 \
-  --network exam-net-sess-101 \
-  -e PUID=1000 -e PGID=1000 \
-  -e VNC_PW=exam \
-  -v /var/run/exam-sess-101/home:/config \
-  lscr.io/linuxserver/webtop:ubuntu-xfce
+### 7.1 Pure Redis-Driven Architecture (Zero Host Disk I/O)
+Instead of running a single host-level X11 display or mounting host directories to disk, each candidate receives an ephemeral, containerized desktop connected directly to the central Redis event bus:
+
+```
+                      Candidate Web Browser (Single Port 3000)
+                                      │
+                                      ▼
+                        FastAPI Dynamic Ingress Gateway
+                                      │
+                     Queries Redis for Container Endpoint
+                                      │
+                ┌─────────────────────┴─────────────────────┐
+                │                                           │
+                ▼                                           ▼
+      WebSocket: /ws/desktop/{id}                HTTP: /desktop/{id}/*
+      Proxies RFB stream                         Proxies noVNC static UI
+                │                                           │
+                └─────────────────────┬─────────────────────┘
+                                      │
+                                      ▼
+                    Docker Container: cka-desktop:{session_id}
+                    (IP: 172.17.0.x — No Host Disk Mounts!)
+      ┌──────────────────────────────────────────────────────────────┐
+      │  • X11 Display :1 + Openbox + Firefox (In-memory tmpfs)      │
+      │  • noVNC / WebSockify listening on container port 6080       │
+      │                                                              │
+      │  ┌────────────────────────────────────────────────────────┐  │
+      │  │ Lightweight Desktop Sidecar Agent (desk-agent)         │  │
+      │  │                                                        │  │
+      │  │ 1. Subscribes to: clipboard:{session_id}               │  │
+      │  │    ──► Instantly pushes web copied snippets into X11   │  │
+      │  │                                                        │  │
+      │  │ 2. Publishes to: clipboard:{session_id}                │  │
+      │  │    ──► Emits desktop copied text back to web & proctor │  │
+      │  │                                                        │  │
+      │  │ 3. Publishes to: events:{session_id}                   │  │
+      │  │    ──► Emits visited doc URLs & active window changes  │  │
+      │  │                                                        │  │
+      │  │ 4. Heartbeat: SET desktop:{id}:alive 1 EX 15           │  │
+      │  └────────────────────────┬───────────────────────────────┘  │
+      └───────────────────────────┼──────────────────────────────────┘
+                                  │
+                                  ▼ (High-speed docker0 loopback)
+              Central Host Redis (172.17.0.1:6379)
+              ├── HSET desktop:{session_id} container_id ip port
+              ├── Channel: clipboard:{session_id}
+              ├── Channel: events:{session_id}
+              └── Channel: terminal:{session_id}
+                                  ▲
+                                  │ (In-memory subscription)
+              Host Recorder (core/recorder.py)
+              - Consumes events:{id} & clipboard:{id}
+              - Writes zero-latency timeline directly to session log
 ```
 
-### 7.2 Key Advantages
-- **Reverse Proxy Routing**: Accessible via `http://<HOST>/desktop/{session_id}/` (no port conflicts on 6080).
-- **Resource Footprint**: ~200MB RAM, < 0.5% CPU per idle user.
-- **Sandboxed Browser**: Candidate runs Firefox in an isolated container with pre-loaded Kubernetes documentation bookmarks and zero access to the host root filesystem.
-- **KasmVNC Protocol**: Offers WebRTC / WebGL hardware-accelerated video streaming with dynamic resolution resizing and direct browser clipboard integration.
+### 7.2 Key Architectural Decisions
+
+1. **Rejection of Host Disk Mounts & SQLite Polling**:
+   - Polling browser history from disk (`places.sqlite` with `shutil.copy2`) creates unnecessary disk thrashing, file locks, and host-container coupling.
+   - In this architecture, the desktop runs **100% statelessly** with in-memory `tmpfs`.
+   - Destroying the container (`docker rm -f`) instantly frees 100% of memory with zero residual disk cleanup required.
+
+2. **Event-Driven Telemetry Integration with Existing Recorder**:
+   - The container sidecar agent hooks browser visits and X11 clipboard events, publishing them directly to Redis channels `events:{session_id}` and `clipboard:{session_id}`.
+   - The host's `core/recorder.py` subscribes in-memory to these channels, seamlessly appending documentation visits, copy/paste operations, and window events to `{session_id}.events.jsonl` with zero disk polling.
+   - Terminal recording remains unified in asciinema `.cast` format. No heavy video encoding (MP4/FFmpeg) is needed.
+
+3. **Portless Dynamic Ingress Gateway**:
+   - Containers bind only to the internal bridge (`172.17.0.x:6080`).
+   - Registration: Upon boot, the desktop publishes `HSET desktop:{session_id} ip <ip> port 6080`.
+   - Reverse Proxy: FastAPI routes:
+     * `GET /desktop/{session_id}/*`: Reverse proxies static noVNC HTML/JS/CSS.
+     * `WebSocket /ws/desktop/{session_id}`: Dynamically proxies the binary RFB WebSocket stream.
+   - Result: All candidate interactions occur over standard port 3000 (or 80/443), eliminating all firewall conflicts and port collisions.
+
+4. **Authentic CKA Exam Browser Environment**:
+   - Minimal Openbox/XFCE window manager (~45 MB RAM).
+   - Pre-seeded Firefox profile with official allowed bookmarks toolbar:
+     * Kubernetes Documentation (`https://kubernetes.io/docs/home/`)
+     * Kubectl Cheat Sheet (`https://kubernetes.io/docs/reference/kubectl/cheatsheet/`)
+     * Kubernetes Tasks & Tutorials (`https://kubernetes.io/docs/tasks/`)
+     * Helm Documentation (`https://helm.sh/docs/`)
+     * Kubernetes Blog (`https://kubernetes.io/blog/`)
 
 ---
 
 ## 8. Implementation Roadmap (Phased Rollout)
 
-### Phase 3.1: Redis Core & Real-Time WebSockets
-- [ ] Deploy Redis instance on host.
-- [ ] Refactor `core/deployer.py` and `web/server.py` to persist sessions in Redis hashes (`session:{id}`).
-- [ ] Implement WebSocket endpoint `/ws/session/{session_id}`.
-- [ ] Connect host clipboard listener to Redis Pub/Sub channel `clipboard:{session_id}` to eliminate HTTP polling.
+### Phase 3.1: Redis Core & Real-Time WebSockets (COMPLETED)
+- [x] Deploy Redis instance on host (`redis-server`).
+- [x] Refactor `core/deployer.py` and `web/server.py` to persist sessions in Redis hashes (`session:{id}`).
+- [x] Implement WebSocket endpoint `/ws/session/{session_id}` with live timer ticks and task transitions.
+- [x] Connect clipboard listener to Redis Pub/Sub channel `clipboard:{session_id}` (zero HTTP polling).
+- [x] Stepped task transition progress bar with cluster race protection.
+- [x] Document Issue #18 (tmux session persistence vs raw scrollback replay).
 
-### Phase 3.2: Ephemeral Desktops & Dynamic Ingress
-- [ ] Package standardized candidate desktop container (XFCE + Firefox + CKA bookmarks).
-- [ ] Configure dynamic reverse proxy (Traefik or FastAPI WebSocket proxy) for `/desktop/{session_id}`.
-- [ ] Add dynamic PTY allocation per candidate sandbox.
+### Phase 3.2: Ephemeral Desktops & Dynamic Ingress (ACTIVE)
+- [ ] Configure Redis on host to bind to `172.17.0.1` (`docker0` bridge) for container access.
+- [ ] Implement Dynamic Ingress Reverse Proxy in `web/server.py` (`/desktop/{session_id}` and `/ws/desktop/{session_id}`).
+- [ ] Package minimal `cka-desktop:latest` Dockerfile (Openbox + TigerVNC + noVNC + Firefox CKA bookmarks + desk-agent).
+- [ ] Implement `core/desktop_pool.py` to orchestrate container spin-up on exam start and teardown on submit.
+- [ ] Wire desktop Redis Pub/Sub events directly into `core/recorder.py`.
 
 ### Phase 3.3: MicroVM Kubeadm Sandboxes
 - [ ] Evaluate **Cloud-Hypervisor** vs **Firecracker (KubeFire)** on the host kernel.
 - [ ] Build minimal `vmlinux` kernel and raw rootfs image containing containerd and kubeadm tools.
 - [ ] Implement Copy-on-Write snapshot restore mechanism for instant (< 200ms) 3-node cluster provisioning.
-- [ ] Implement Redis-backed warm VM pool manager to maintain 2 ready-to-use cluster sets on standby.
+- [ ] Implement Redis-backed warm VM pool manager to maintain ready-to-use cluster sets on standby.
+
