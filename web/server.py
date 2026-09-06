@@ -262,10 +262,8 @@ def get_session(request: Request):
     admin_auth = is_admin_authenticated(request)
     if url_admin in ("1", "true", "yes") and admin_auth:
         is_admin = True
-    elif url_candidate in ("1", "true", "yes"):
-        is_admin = False
     else:
-        is_admin = admin_auth
+        is_admin = False
 
     # Candidate token routing: resolve session_id from token
     session = None
@@ -1406,6 +1404,49 @@ def admin_terminate_session(identifier: str, request: Request):
 
     redis_bus.delete_invitation(identifier)
     return {"status": "ok", "message": f"Session or invite {identifier} terminated"}
+
+
+@app.post("/api/admin/sessions/{identifier}/reset")
+def admin_reset_session(identifier: str, request: Request):
+    if not is_admin_authenticated(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    try:
+        recorder.attach_or_resume(identifier)
+        recorder.log_event("ADMIN_EXAM_RESET", {"session_id": identifier, "actor": "admin"}, actor="admin")
+    except Exception:
+        pass
+
+    desktop_mgr.stop_desktop(identifier)
+    redis_bus.archive_session(identifier, status="reset")
+
+    active_s = deployer.load_active_session(loader)
+    if active_s and active_s.session_id == identifier:
+        deployer.clear_session(cleanup_cluster=True)
+
+    return {"status": "ok", "message": f"Session {identifier} reset and cluster cleaned"}
+
+
+@app.post("/api/admin/sessions/{identifier}/end")
+def admin_end_session(identifier: str, request: Request):
+    if not is_admin_authenticated(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    try:
+        recorder.attach_or_resume(identifier)
+        recorder.log_event("ADMIN_EXAM_END", {"session_id": identifier, "actor": "admin"}, actor="admin")
+    except Exception:
+        pass
+
+    active_s = deployer.load_active_session(loader)
+    scorecard = None
+    if active_s and active_s.session_id == identifier:
+        scorecard = action_submit()
+    else:
+        desktop_mgr.stop_desktop(identifier)
+        redis_bus.archive_session(identifier, status="submitted")
+
+    return {"status": "ok", "message": f"Session {identifier} ended and evaluated", "scorecard": scorecard}
 
 
 # --- Built-in WebSocket PTY Terminal ---

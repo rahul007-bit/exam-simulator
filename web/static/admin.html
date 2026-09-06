@@ -700,13 +700,24 @@
                 <span id="observeTokenBadge" class="code-cell" style="color: #38bdf8;"></span>
                 <span id="observeStatusBadge" class="status-pill status-active">ACTIVE</span>
             </div>
-            <div style="display: flex; align-items: center; gap: 14px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
                 <div style="font-family: var(--font-code); font-size: 0.88rem; color: #10b981; font-weight: 700;" id="observeTimerDisplay">
                     --:--:--
                 </div>
                 <span class="admin-badge" style="background: rgba(239, 68, 68, 0.2); border-color: #ef4444; color: #fca5a5;">
                     VIEW-ONLY VNC
                 </span>
+
+                <!-- Admin Action Controls directly in Observe Mode -->
+                <button class="btn btn-secondary btn-sm" id="btnObserveReviewReplay" onclick="observeReviewAndReplay()" title="Open recordings, events timeline & terminal replay for this session">
+                    ▶ Review & Replay
+                </button>
+                <button class="btn btn-warning btn-sm" id="btnObserveResetExam" onclick="observeResetExam()" title="Reset candidate exam session and clean cluster">
+                    🔄 Reset Exam
+                </button>
+                <button class="btn btn-danger btn-sm" id="btnObserveEndExam" onclick="observeEndExam()" title="End candidate exam now and evaluate tasks">
+                    ⏹ End Exam
+                </button>
             </div>
         </div>
 
@@ -754,6 +765,89 @@
                     <iframe id="observeVncFrame" class="observe-iframe" src="about:blank"></iframe>
                     <div id="observeTerminalContainer"></div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Candidate Session Post-Exam Review & Replay Modal -->
+    <div class="modal-backdrop" id="modalReview" style="display:none; z-index: 100050;">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-header">
+                <div>
+                    <h2 id="reviewModalTitle">Candidate Session Review</h2>
+                    <div id="reviewModalSubtitle" style="font-size: 0.8rem; color: #94a3b8; margin-top: 2px;"></div>
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <a id="btnDownloadCast" class="btn btn-secondary" href="#" download style="display:none; text-decoration: none; font-size: 0.78rem;">Download .cast</a>
+                    <a id="btnDownloadEvents" class="btn btn-secondary" href="#" download style="display:none; text-decoration: none; font-size: 0.78rem;">Download Events</a>
+                    <button class="modal-close" onclick="closeReviewModal()">Close</button>
+                </div>
+            </div>
+            <div class="modal-body">
+                <div class="replay-layout">
+                    <!-- Left Column: Timeline & Task Overview -->
+                    <div class="replay-sidebar">
+                        <div class="replay-sidebar-header">
+                            <div class="replay-tab-group">
+                                <button class="replay-tab-btn active" id="btnTabTimeline" onclick="switchReviewTab('timeline')">Events Timeline</button>
+                                <button class="replay-tab-btn" id="btnTabTasks" onclick="switchReviewTab('tasks')">Task Breakdown</button>
+                            </div>
+                            <span id="reviewEventCount" style="font-size: 0.75rem; color: #64748b;">0 events</span>
+                        </div>
+                        <div class="replay-sidebar-content" id="reviewSidebarContent">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+
+                    <!-- Right Column: Terminal Replay Screen -->
+                    <div class="replay-player-pane">
+                        <div class="replay-terminal-wrapper">
+                            <div id="replayTerminalContainer"></div>
+                        </div>
+                        <div class="replay-control-bar">
+                            <div class="replay-progress-row">
+                                <input type="range" id="replayScrubber" class="replay-scrubber" min="0" max="100" value="0" step="0.1" oninput="onScrubberInput(this.value)" onchange="onScrubberChange(this.value)">
+                                <span class="replay-time-text" id="replayTimeDisplay">00:00 / 00:00</span>
+                            </div>
+                            <div class="replay-actions-row">
+                                <div class="replay-btn-group">
+                                    <button class="replay-btn primary" id="btnReplayPlayPause" onclick="toggleReplayPlayPause()">
+                                        <span id="replayPlayIcon">▶ Play</span>
+                                    </button>
+                                    <button class="replay-btn" onclick="seekReplayRelative(-10)" title="Rewind 10 seconds">⏪ -10s</button>
+                                    <button class="replay-btn" onclick="seekReplayRelative(10)" title="Forward 10 seconds">⏩ +10s</button>
+                                    <button class="replay-btn" onclick="restartReplay()" title="Restart replay">⏮ Restart</button>
+                                </div>
+                                <div class="replay-btn-group">
+                                    <label style="font-size: 0.78rem; color: #94a3b8;">Speed:</label>
+                                    <select class="replay-speed-select" id="replaySpeedSelect" onchange="setReplaySpeed(this.value)">
+                                        <option value="0.5">0.5x</option>
+                                        <option value="1.0" selected>1.0x</option>
+                                        <option value="2.0">2.0x</option>
+                                        <option value="5.0">5.0x</option>
+                                        <option value="10.0">10.0x</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Candidate Scorecard Results Modal (for End Exam) -->
+    <div class="modal-backdrop" id="modalScorecard" style="display:none; z-index: 100060;">
+        <div class="modal-dialog modal-large">
+            <div class="modal-header">
+                <h2 id="scorecardModalTitle">Exam Results & Scorecard</h2>
+                <button class="modal-close" onclick="closeModal('modalScorecard')">Close</button>
+            </div>
+            <div class="modal-body" id="scorecardModalContent" style="padding: 20px; overflow-y: auto; max-height: 70vh;">
+                <!-- Populated dynamically -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('modalScorecard')">Close</button>
             </div>
         </div>
     </div>

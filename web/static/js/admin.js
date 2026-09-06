@@ -470,6 +470,13 @@ async function loadAdminSessions() {
                     </button>
                 `;
             }
+            if (sid) {
+                actionsHtml += `
+                    <button class="btn btn-secondary btn-sm" title="Review & Replay Candidate Session" onclick="openReviewModal('${sid}')">
+                        ▶ Replay
+                    </button>
+                `;
+            }
             const termIdentifier = sid || tok;
             if (status === 'active' || status === 'pending') {
                 actionsHtml += `
@@ -759,4 +766,478 @@ function escapeHtml(str) {
             default: return m;
         }
     });
+}
+
+/* ==========================================================================
+   Observe Mode Action Controls (Review & Replay, Reset Exam, End Exam)
+   ========================================================================== */
+
+function observeReviewAndReplay() {
+    if (!currentObserveSessionId) {
+        showToast('No active observe session');
+        return;
+    }
+    openReviewModal(currentObserveSessionId);
+}
+
+async function observeResetExam() {
+    if (!currentObserveSessionId) return;
+    if (!confirm(`Reset exam for session #${currentObserveSessionId}?\n\nThis will clear the session and reset cluster namespaces.`)) {
+        return;
+    }
+    try {
+        const res = await fetch(`/api/admin/sessions/${encodeURIComponent(currentObserveSessionId)}/reset`, {
+            method: 'POST',
+        });
+        if (!res.ok) throw new Error(await res.text());
+        showToast(`Session ${currentObserveSessionId} reset and cluster cleaned`);
+        await refreshObserveData(currentObserveSessionId);
+        await loadAdminSessions();
+    } catch (err) {
+        alert(`Failed to reset exam: ${err.message}`);
+    }
+}
+
+async function observeEndExam() {
+    if (!currentObserveSessionId) return;
+    if (!confirm(`End and evaluate exam for session #${currentObserveSessionId} now?\n\nThis will submit all candidate tasks and grade the exam.`)) {
+        return;
+    }
+    try {
+        const res = await fetch(`/api/admin/sessions/${encodeURIComponent(currentObserveSessionId)}/end`, {
+            method: 'POST',
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        showToast(`Session ${currentObserveSessionId} ended and evaluated`);
+        if (data.scorecard) {
+            renderAdminScorecard(data.scorecard);
+        }
+        await loadAdminSessions();
+    } catch (err) {
+        alert(`Failed to end exam: ${err.message}`);
+    }
+}
+
+/* ==========================================================================
+   Modals & Scorecard Viewer
+   ========================================================================== */
+
+window.openModal = function (modalId) {
+    const m = document.getElementById(modalId);
+    if (m) m.style.display = 'flex';
+};
+
+window.closeModal = function (modalId) {
+    const m = document.getElementById(modalId);
+    if (m) m.style.display = 'none';
+};
+
+function renderAdminScorecard(scorecard) {
+    const content = document.getElementById('scorecardModalContent');
+    if (!content) return;
+
+    const passed = !!scorecard.passed;
+    const score = scorecard.score ?? 0;
+    const maxScore = scorecard.max_score ?? 100;
+    const pct = scorecard.percentage !== undefined ? scorecard.percentage : Math.round((score / Math.max(1, maxScore)) * 100);
+
+    let tasksHtml = '';
+    const results = scorecard.task_results || scorecard.results || [];
+    if (results.length > 0) {
+        tasksHtml = `
+            <table class="admin-table" style="margin-top: 16px;">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Task Title</th>
+                        <th>Score</th>
+                        <th>Result</th>
+                        <th>Feedback</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${results.map((t, idx) => `
+                        <tr>
+                            <td>#${t.task_num || (idx + 1)}</td>
+                            <td><strong>${escapeHtml(t.title || 'Task')}</strong></td>
+                            <td>${t.score !== undefined ? `${t.score}/${t.max_score || t.points || 0}` : '—'}</td>
+                            <td>
+                                <span class="status-pill ${t.passed ? 'status-active' : 'status-terminated'}">
+                                    ${t.passed ? 'PASSED' : 'FAILED'}
+                                </span>
+                            </td>
+                            <td style="font-size: 0.8rem; color: #94a3b8;">${escapeHtml(t.message || '—')}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        `;
+    }
+
+    content.innerHTML = `
+        <div style="text-align: center; margin-bottom: 20px;">
+            <div style="font-size: 2.8rem; margin-bottom: 8px;">${passed ? '🎉' : '📋'}</div>
+            <h3 style="font-size: 1.3rem; margin-bottom: 6px; color: ${passed ? '#34d399' : '#f87171'};">
+                Candidate Result: ${passed ? 'PASSED' : 'FAILED'} (${pct}%)
+            </h3>
+            <div style="font-size: 0.9rem; color: #94a3b8;">
+                Points: <strong>${score}</strong> / ${maxScore} | Exam: ${escapeHtml(scorecard.name || 'Exam Drill')}
+            </div>
+        </div>
+        ${tasksHtml}
+    `;
+
+    openModal('modalScorecard');
+}
+
+/* ==========================================================================
+   Candidate Session Post-Exam Review & Replay Player Engine
+   ========================================================================== */
+
+let replayTerm = null;
+let replayFitAddon = null;
+let replayFrames = [];
+let replayDuration = 0;
+let replayCurrentTime = 0;
+let replayIsPlaying = false;
+let replaySpeed = 1.0;
+let replayAnimFrameId = null;
+let replayLastFrameTime = null;
+let replayNextEventIndex = 0;
+let replayActiveSessionData = null;
+let replayCurrentTab = 'timeline';
+
+window.openReviewModal = async function (sessionId) {
+    openModal('modalReview');
+    initReplayTerminal();
+
+    const titleEl = document.getElementById('reviewModalTitle');
+    const subEl = document.getElementById('reviewModalSubtitle');
+    const btnCast = document.getElementById('btnDownloadCast');
+    const btnEvents = document.getElementById('btnDownloadEvents');
+
+    titleEl.innerText = `Candidate Session Review: ${sessionId}`;
+    subEl.innerText = 'Loading session metadata, timeline, and terminal cast...';
+
+    btnCast.href = `/api/recordings/${sessionId}/cast`;
+    btnCast.download = `${sessionId}.cast`;
+    btnCast.style.display = 'inline-flex';
+
+    btnEvents.href = `/api/recordings/${sessionId}/events`;
+    btnEvents.download = `${sessionId}.events.json`;
+    btnEvents.style.display = 'inline-flex';
+
+    pauseReplay();
+
+    try {
+        const [detailRes, castRes] = await Promise.all([
+            fetch(`/api/recordings/${sessionId}`),
+            fetch(`/api/recordings/${sessionId}/cast`)
+        ]);
+
+        if (!detailRes.ok) throw new Error('Could not fetch session metadata');
+        const sessionData = await detailRes.json();
+        replayActiveSessionData = sessionData;
+
+        const dur = sessionData.duration_formatted || (sessionData.duration_seconds ? formatDurationSeconds(sessionData.duration_seconds) : '--:--');
+        const scoreStr = sessionData.percentage !== null && sessionData.percentage !== undefined ? `${sessionData.percentage}%` : 'In Progress';
+        const stText = sessionData.passed === true ? 'PASSED' : (sessionData.passed === false ? 'FAILED' : 'IN PROGRESS');
+        subEl.innerText = `Exam: ${sessionData.name || 'Exam'} | Result: ${stText} (${scoreStr}) | Duration: ${dur} | Total Events: ${sessionData.events_count || 0}`;
+
+        renderReviewSidebar();
+
+        if (castRes.ok) {
+            const castText = await castRes.text();
+            parseCastRecording(castText);
+        } else {
+            replayFrames = [];
+            replayDuration = sessionData.duration_seconds || 60;
+        }
+
+        seekReplay(0);
+    } catch (e) {
+        subEl.innerText = `Error loading session: ${e.message}`;
+    }
+};
+
+window.closeReviewModal = function () {
+    pauseReplay();
+    closeModal('modalReview');
+};
+
+function initReplayTerminal() {
+    if (replayTerm) {
+        replayTerm.reset();
+        if (replayFitAddon) {
+            setTimeout(() => replayFitAddon.fit(), 50);
+        }
+        return;
+    }
+    const container = document.getElementById('replayTerminalContainer');
+    if (!container || !window.Terminal) return;
+
+    replayTerm = new Terminal({
+        cursorBlink: false,
+        fontFamily: "'Fira Code', monospace",
+        fontSize: 13,
+        lineHeight: 1.2,
+        theme: {
+            background: '#090d14',
+            foreground: '#f1f5f9',
+            cursor: '#38bdf8',
+            selectionBackground: '#334155',
+            black: '#000000',
+            red: '#ef4444',
+            green: '#10b981',
+            yellow: '#f59e0b',
+            blue: '#3b82f6',
+            magenta: '#a855f7',
+            cyan: '#06b6d4',
+            white: '#f1f5f9',
+        }
+    });
+
+    if (window.FitAddon && window.FitAddon.FitAddon) {
+        replayFitAddon = new FitAddon.FitAddon();
+        replayTerm.loadAddon(replayFitAddon);
+    }
+
+    replayTerm.open(container);
+    setTimeout(() => {
+        if (replayFitAddon) replayFitAddon.fit();
+    }, 100);
+}
+
+function parseCastRecording(castText) {
+    const lines = castText.split('\n');
+    replayFrames = [];
+    replayDuration = 0;
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line || line.startsWith('{')) continue;
+        try {
+            const entry = JSON.parse(line);
+            if (Array.isArray(entry) && entry.length >= 3) {
+                const relTime = entry[0];
+                const type = entry[1];
+                const content = entry[2];
+                replayFrames.push({ time: relTime, type, content });
+                if (relTime > replayDuration) {
+                    replayDuration = relTime;
+                }
+            }
+        } catch (_) {}
+    }
+
+    if (replayDuration <= 0 && replayActiveSessionData && replayActiveSessionData.duration_seconds) {
+        replayDuration = replayActiveSessionData.duration_seconds;
+    }
+
+    const scrubber = document.getElementById('replayScrubber');
+    if (scrubber) scrubber.max = Math.max(1, replayDuration);
+}
+
+function renderReviewSidebar() {
+    const container = document.getElementById('reviewSidebarContent');
+    const countEl = document.getElementById('reviewEventCount');
+    if (!container || !replayActiveSessionData) return;
+
+    if (replayCurrentTab === 'timeline') {
+        const events = replayActiveSessionData.events || [];
+        if (countEl) countEl.innerText = `${events.length} events`;
+
+        if (events.length === 0) {
+            container.innerHTML = '<div style="padding: 16px; color: #64748b; font-size: 0.82rem; text-align: center;">No structured event logs recorded for this session.</div>';
+            return;
+        }
+
+        container.innerHTML = `
+            <div class="timeline-list">
+                ${events.map((ev, idx) => {
+                    const t = ev.relative_time !== undefined ? ev.relative_time : 0;
+                    const actorBadge = ev.actor === 'admin' ? '<span style="font-size:0.65rem; background:rgba(239,68,68,0.2); color:#fca5a5; padding:1px 4px; border-radius:3px;">ADMIN</span>' : '';
+                    let badgeClass = 'badge-info';
+                    if (ev.type.includes('START') || ev.type.includes('CONNECT')) badgeClass = 'badge-success';
+                    else if (ev.type.includes('END') || ev.type.includes('FAIL') || ev.type.includes('DISCONNECT') || ev.type.includes('SUBMIT')) badgeClass = 'badge-danger';
+                    else if (ev.type.includes('FLAG') || ev.type.includes('WARNING')) badgeClass = 'badge-warning';
+
+                    return `
+                        <div class="timeline-item" onclick="seekReplay(${t})" data-event-idx="${idx}">
+                            <div class="timeline-meta">
+                                <span class="timeline-time">${formatReplayTime(t)}</span>
+                                <div>
+                                    ${actorBadge}
+                                    <span class="timeline-badge ${badgeClass}">${escapeHtml(ev.type)}</span>
+                                </div>
+                            </div>
+                            <div style="font-size: 0.78rem; color: #cbd5e1; word-break: break-word;">
+                                ${escapeHtml(JSON.stringify(ev.data || {}))}
+                            </div>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        `;
+    } else {
+        const tasks = replayActiveSessionData.task_timeline || [];
+        if (countEl) countEl.innerText = `${tasks.length} tasks`;
+
+        if (tasks.length === 0) {
+            container.innerHTML = '<div style="padding: 16px; color: #64748b; font-size: 0.82rem; text-align: center;">No task transitions recorded.</div>';
+            return;
+        }
+
+        container.innerHTML = `
+            <div class="timeline-list">
+                ${tasks.map(task => {
+                    const t = task.start_time || 0;
+                    return `
+                        <div class="timeline-item" onclick="seekReplay(${t})">
+                            <div class="timeline-meta">
+                                <span class="timeline-time">${formatReplayTime(t)}</span>
+                                <span class="timeline-badge badge-primary">Task ${task.task_num}</span>
+                            </div>
+                            <div style="font-size: 0.82rem; font-weight: 600; color: #f1f5f9; margin-top: 2px;">
+                                ${escapeHtml(task.title || 'Task Details')}
+                            </div>
+                            <div style="font-size: 0.74rem; color: #94a3b8; display: flex; justify-content: space-between; margin-top: 4px;">
+                                <span>Duration: ${task.duration ? formatDurationSeconds(task.duration) : '--:--'}</span>
+                                <span style="color: ${task.score > 0 ? '#34d399' : '#94a3b8'};">Score: ${task.score !== undefined ? `${task.score}/${task.points}` : '—'}</span>
+                            </div>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        `;
+    }
+}
+
+window.switchReviewTab = function (tab) {
+    replayCurrentTab = tab;
+    const btnTimeline = document.getElementById('btnTabTimeline');
+    const btnTasks = document.getElementById('btnTabTasks');
+    if (tab === 'timeline') {
+        if (btnTimeline) btnTimeline.classList.add('active');
+        if (btnTasks) btnTasks.classList.remove('active');
+    } else {
+        if (btnTasks) btnTasks.classList.add('active');
+        if (btnTimeline) btnTimeline.classList.remove('active');
+    }
+    renderReviewSidebar();
+};
+
+window.toggleReplayPlayPause = function () {
+    if (replayIsPlaying) {
+        pauseReplay();
+    } else {
+        playReplay();
+    }
+};
+
+function playReplay() {
+    if (replayCurrentTime >= replayDuration) {
+        seekReplay(0);
+    }
+    replayIsPlaying = true;
+    replayLastFrameTime = performance.now();
+    const icon = document.getElementById('replayPlayIcon');
+    if (icon) icon.innerText = '⏸ Pause';
+    const btn = document.getElementById('btnReplayPlayPause');
+    if (btn) btn.classList.remove('primary');
+    replayTick();
+}
+
+function pauseReplay() {
+    replayIsPlaying = false;
+    if (replayAnimFrameId) {
+        cancelAnimationFrame(replayAnimFrameId);
+        replayAnimFrameId = null;
+    }
+    const icon = document.getElementById('replayPlayIcon');
+    if (icon) icon.innerText = '▶ Play';
+    const btn = document.getElementById('btnReplayPlayPause');
+    if (btn) btn.classList.add('primary');
+}
+
+function replayTick() {
+    if (!replayIsPlaying) return;
+
+    const now = performance.now();
+    const deltaSeconds = ((now - replayLastFrameTime) / 1000) * replaySpeed;
+    replayLastFrameTime = now;
+
+    const newTime = replayCurrentTime + deltaSeconds;
+    renderReplayTo(newTime);
+
+    if (newTime >= replayDuration) {
+        pauseReplay();
+        return;
+    }
+
+    replayAnimFrameId = requestAnimationFrame(replayTick);
+}
+
+function renderReplayTo(targetTime) {
+    targetTime = Math.max(0, Math.min(targetTime, replayDuration));
+    while (replayNextEventIndex < replayFrames.length && replayFrames[replayNextEventIndex].time <= targetTime) {
+        const frame = replayFrames[replayNextEventIndex];
+        if (frame.type === 'o' && replayTerm) {
+            replayTerm.write(frame.content);
+        }
+        replayNextEventIndex++;
+    }
+
+    replayCurrentTime = targetTime;
+    const scrubber = document.getElementById('replayScrubber');
+    if (scrubber) scrubber.value = targetTime;
+
+    const timeDisplay = document.getElementById('replayTimeDisplay');
+    if (timeDisplay) {
+        timeDisplay.innerText = `${formatReplayTime(targetTime)} / ${formatReplayTime(replayDuration)}`;
+    }
+}
+
+window.seekReplay = function (targetTime) {
+    targetTime = Math.max(0, Math.min(targetTime, replayDuration));
+    if (replayTerm) replayTerm.reset();
+    replayNextEventIndex = 0;
+    replayCurrentTime = 0;
+    renderReplayTo(targetTime);
+};
+
+window.seekReplayRelative = function (delta) {
+    seekReplay(replayCurrentTime + delta);
+};
+
+window.restartReplay = function () {
+    seekReplay(0);
+};
+
+window.setReplaySpeed = function (speed) {
+    replaySpeed = parseFloat(speed) || 1.0;
+};
+
+window.onScrubberInput = function (val) {
+    const time = parseFloat(val);
+    pauseReplay();
+    seekReplay(time);
+};
+
+window.onScrubberChange = function (val) {
+    const time = parseFloat(val);
+    seekReplay(time);
+};
+
+function formatDurationSeconds(sec) {
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m}m ${s}s`;
+}
+
+function formatReplayTime(seconds) {
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
