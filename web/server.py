@@ -29,6 +29,7 @@ from core.models import ExamSession, Question, GradeResult
 from core.recorder import recorder
 from core.redis_bus import bus as redis_bus, get_system_resource_info
 from core.desktop_manager import desktop_mgr
+from core.sandbox_orchestrator import orchestrator
 
 app = FastAPI(title="Kubernetes Exam Web Simulator", version="2.0.0")
 
@@ -898,12 +899,8 @@ def ensure_k3d_cluster_running(cluster_name: str = "cka") -> bool:
                         return True
     except Exception as e:
         print(f"[ClusterAutoStart] Warning checking cluster: {e}", flush=True)
-    return True
-
-
 @app.post("/api/start")
 def start_exam(req: StartRequest, request: Request):
-    ensure_k3d_cluster_running("cka")
     cand_tok = req.candidate_token
     # If candidate token is provided, check if session already active for it
     if cand_tok:
@@ -925,16 +922,7 @@ def start_exam(req: StartRequest, request: Request):
     res_info = get_system_resource_info()
     running = res_info["running_containers"]
     max_sessions = res_info["max_concurrent_sessions"]
-    avail_mem = res_info["available_mem_mb"]
-
-    # Check if this start request is replacing an existing running desktop container
-    is_replacing_running = False
-    if old_session and old_session.session_id and is_container_running(old_session.session_id):
-        is_replacing_running = True
-
-    effective_running = (running - 1) if is_replacing_running else running
-
-    if effective_running >= max_sessions or avail_mem < 350:
+    if running >= max_sessions:
         raise HTTPException(
             status_code=429,
             detail=f"Server resource limit reached: Maximum concurrent sessions ({max_sessions}) currently active ({running} running). Please wait for an active session to finish or contact the administrator."
@@ -943,7 +931,7 @@ def start_exam(req: StartRequest, request: Request):
     # Archive any currently active session before starting a new one
     if old_session and old_session.session_id:
         try:
-            desktop_mgr.stop_desktop(old_session.session_id)
+            orchestrator.teardown_session(old_session.session_id)
             redis_bus.archive_session(old_session.session_id, status="replaced")
         except Exception:
             pass

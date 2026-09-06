@@ -117,6 +117,10 @@ class DesktopManager:
         cmd = [
             "docker", "run", "-d",
             "--name", container_name,
+            "--memory", "1024m",
+            "--memory-swap", "1024m",
+            "--cpus", "1.5",
+            "--pids-limit", "500",
             "--security-opt", "seccomp=unconfined",
             "-e", f"SESSION_ID={session_id}",
             "-e", f"REDIS_HOST={redis_host}",
