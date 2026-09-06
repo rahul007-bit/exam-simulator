@@ -47,12 +47,15 @@ RUN useradd -u 1000 -m -s /bin/bash exam && \
     chown -R exam:exam /home/exam
 
 # Configure exam user bashrc with CKA shortcuts & autocompletion
-RUN echo "if [ -f /usr/share/bash-completion/bash_completion ]; then . /usr/share/bash-completion/bash_completion; fi" >> /home/exam/.bashrc && \
-    echo "source <(kubectl completion bash 2>/dev/null) || true" >> /home/exam/.bashrc && \
+RUN mkdir -p /etc/bash_completion.d && \
+    /usr/local/bin/kubectl completion bash > /etc/bash_completion.d/kubectl 2>/dev/null || true && \
+    echo "if [ -f /usr/share/bash-completion/bash_completion ]; then . /usr/share/bash-completion/bash_completion; fi" >> /home/exam/.bashrc && \
+    echo "[ -f /etc/bash_completion.d/kubectl ] && . /etc/bash_completion.d/kubectl 2>/dev/null || true" >> /home/exam/.bashrc && \
     echo "alias k=kubectl" >> /home/exam/.bashrc && \
     echo "complete -o default -F __start_kubectl k 2>/dev/null || true" >> /home/exam/.bashrc && \
     echo 'export do="--dry-run=client -o yaml"' >> /home/exam/.bashrc && \
     echo 'export now="--force --grace-period=0"' >> /home/exam/.bashrc
+
 
 # Install Firefox CKA policies and bookmarks
 COPY policies.json /etc/firefox-esr/policies/policies.json

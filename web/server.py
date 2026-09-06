@@ -163,21 +163,40 @@ def is_admin_authenticated(req_or_ws) -> bool:
     return False
 
 
+_running_containers_cache: set = set()
+_last_container_cache_time: float = 0.0
+
+
+def get_running_desktop_containers() -> set:
+    """Returns a cached set of running desktop container names with a 2-second TTL to avoid CLI subprocess storms."""
+    global _running_containers_cache, _last_container_cache_time
+    now = time.time()
+    if now - _last_container_cache_time < 2.0 and _running_containers_cache is not None:
+        return _running_containers_cache
+    try:
+        r = subprocess.run(
+            ["docker", "ps", "--filter", "name=cka-desktop-", "--format", "{{.Names}}"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if r.returncode == 0:
+            _running_containers_cache = set(r.stdout.strip().split())
+            _last_container_cache_time = now
+            return _running_containers_cache
+    except Exception:
+        pass
+    return _running_containers_cache
+
+
 def is_container_running(sid: Optional[str]) -> bool:
-    """Checks whether the docker desktop container for the session is actively running."""
+    """Checks whether the docker desktop container for the session is actively running (O(1) cached lookup)."""
     if not sid or sid == "None":
         return False
     container_name = f"cka-desktop-{sid}"
-    try:
-        r = subprocess.run(
-            ["docker", "inspect", "-f", "{{.State.Running}}", container_name],
-            capture_output=True,
-            text=True,
-            timeout=1,
-        )
-        return r.returncode == 0 and "true" in r.stdout.lower()
-    except Exception:
-        return False
+    running_set = get_running_desktop_containers()
+    return container_name in running_set
+
 
 
 # Idle timeout: auto-kill container + session after this many minutes of inactivity
@@ -1856,10 +1875,43 @@ _last_x11_clipboard = ""
 
 @app.on_event("startup")
 async def start_background_workers():
+    # 1. Initial scan: warm up question catalog and kubectl completion in Redis
+    loop = asyncio.get_running_loop()
+    def warm_up_cache():
+        try:
+            print("[Startup] Scanning question catalog into Redis...", flush=True)
+            loader.reload(use_cache=False)
+            count = len(loader.all())
+            print(f"[Startup] Question catalog pre-warmed: {count} questions cached in Redis.", flush=True)
+        except Exception as ex:
+            print(f"[Startup] Catalog cache warm-up error: {ex}", flush=True)
+
+        # Pre-cache kubectl completion in Redis and write to /etc/bash_completion.d/kubectl
+        try:
+            comp = redis_bus.get_kubectl_completion()
+            if not comp:
+                r = subprocess.run(["kubectl", "completion", "bash"], capture_output=True, text=True, timeout=10)
+                if r.returncode == 0 and r.stdout:
+                    comp = r.stdout
+                    redis_bus.cache_kubectl_completion(comp)
+            if comp:
+                p = Path("/etc/bash_completion.d/kubectl")
+                if not p.exists() or p.stat().st_size == 0:
+                    p.parent.mkdir(parents=True, exist_ok=True)
+                    p.write_text(comp, encoding="utf-8")
+        except Exception:
+            pass
+
+    async def _run_warmup():
+        await loop.run_in_executor(None, warm_up_cache)
+
+    asyncio.create_task(_run_warmup())
+
     asyncio.create_task(_clipboard_x11_monitor())
     asyncio.create_task(_session_timer_broadcaster())
     asyncio.create_task(_idle_session_reaper())
     asyncio.create_task(_session_expiry_enforcer())
+
 
 async def _clipboard_x11_monitor():
     global _last_x11_clipboard

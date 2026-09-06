@@ -573,6 +573,55 @@ class RedisBus:
             pass
         return None
 
+    def cache_question_catalog(self, catalog: Dict[str, Any], ttl: int = 86400 * 7) -> bool:
+        """Caches the full scanned question catalog into Redis as JSON."""
+        if not self.is_available():
+            return False
+        try:
+            client = self.get_sync_client()
+            client.set("catalog:questions", json.dumps(catalog), ex=ttl)
+            return True
+        except Exception:
+            return False
+
+    def get_cached_question_catalog(self) -> Optional[Dict[str, Any]]:
+        """Retrieves cached question catalog from Redis."""
+        if not self.is_available():
+            return None
+        try:
+            client = self.get_sync_client()
+            raw = client.get("catalog:questions")
+            if raw:
+                return json.loads(raw)
+        except Exception:
+            pass
+        return None
+
+    def cache_kubectl_completion(self, completion_script: str, ttl: int = 86400 * 30) -> bool:
+        """Caches pre-compiled kubectl bash completion script in Redis."""
+        if not self.is_available():
+            return False
+        try:
+            client = self.get_sync_client()
+            client.set("cache:kubectl_completion", completion_script, ex=ttl)
+            return True
+        except Exception:
+            return False
+
+    def get_kubectl_completion(self) -> Optional[str]:
+        """Retrieves cached kubectl bash completion script from Redis."""
+        if not self.is_available():
+            return None
+        try:
+            client = self.get_sync_client()
+            raw = client.get("cache:kubectl_completion")
+            if raw:
+                return raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
+        except Exception:
+            pass
+        return None
+
+
 
 # Global singleton instance
 bus = RedisBus()

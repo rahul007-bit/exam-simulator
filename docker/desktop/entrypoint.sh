@@ -34,6 +34,13 @@ try:
         with open("/home/exam/active_exam.md", "wb") as f:
             f.write(exam_md)
         print(f"[Entrypoint] Successfully injected active_exam.md from Redis")
+
+    comp = r.get("cache:kubectl_completion")
+    if comp:
+        os.makedirs("/etc/bash_completion.d", exist_ok=True)
+        with open("/etc/bash_completion.d/kubectl", "wb") as f:
+            f.write(comp)
+        print(f"[Entrypoint] Successfully injected pre-compiled kubectl completion from Redis")
 except Exception as e:
     print(f"[Entrypoint] Warning: could not retrieve credentials/tasks from Redis: {e}")
 PYEOF

@@ -46,8 +46,8 @@ fi
 # Kubernetes Exam Environment - Candidate Guide & Helpers
 # ==========================================================
 
-# Kubectl aliases & bash completion
-source <(kubectl completion bash 2>/dev/null) 2>/dev/null || true
+# Kubectl aliases & bash completion (pre-compiled)
+[ -f /etc/bash_completion.d/kubectl ] && . /etc/bash_completion.d/kubectl 2>/dev/null || true
 alias k=kubectl
 complete -o default -F __start_kubectl k 2>/dev/null || true
 export dr="--dry-run=client -o yaml"
@@ -55,13 +55,7 @@ export now="--force --grace-period=0"
 export EDITOR="nano"
 export KUBE_EDITOR="nano"
 
-# Auto-wrap unrecorded interactive shells in desktop into exam session recording
-if [[ $- == *i* ]] && [ -z "$EXAM_RECORDED" ] && [ -t 0 ] && [ -n "$DISPLAY" ]; then
-    if sudo -n /root/cka-labs/labctl status >/dev/null 2>&1; then
-        export EXAM_RECORDED=1
-        exec sudo /root/cka-labs/labctl record-shell
-    fi
-fi
+
 
 # Welcome banner (shown on interactive shell startup)
 if [[ $- == *i* ]]; then
