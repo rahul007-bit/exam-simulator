@@ -64,6 +64,7 @@ async function checkAuth() {
             document.getElementById('liveStatusIndicator').style.display = 'inline-flex';
 
             await loadPresetsAndConfig();
+            await loadSystemResources();
             await loadAdminSessions();
 
             if (!adminRefreshInterval) {
@@ -71,6 +72,7 @@ async function checkAuth() {
                     // Do not refresh table if currently in observe mode
                     if (!currentObserveSessionId) {
                         loadAdminSessions();
+                        loadSystemResources();
                     }
                 }, 5000);
             }
@@ -152,6 +154,114 @@ async function loadPresetsAndConfig() {
         populatePresetSelects();
     } catch (err) {
         console.error('Failed to load presets or config:', err);
+    }
+}
+
+/* ==========================================================================
+   Server Capacity & Resource Limits
+   ========================================================================== */
+
+async function loadSystemResources() {
+    try {
+        const res = await fetch('/api/admin/resources');
+        if (!res.ok) return;
+        const data = await res.json();
+
+        // 1. RAM Usage
+        const totalGb = (data.total_mem_mb / 1024).toFixed(1);
+        const usedGb = (data.used_mem_mb / 1024).toFixed(1);
+        const percent = data.total_mem_mb > 0 ? Math.round((data.used_mem_mb / data.total_mem_mb) * 100) : 0;
+
+        const textElem = document.getElementById('ramTextUsage');
+        if (textElem) textElem.innerText = `${usedGb} / ${totalGb} GB`;
+
+        const barElem = document.getElementById('ramUsageBar');
+        if (barElem) {
+            barElem.style.width = `${Math.min(100, percent)}%`;
+            if (percent > 85) {
+                barElem.style.background = '#ef4444';
+            } else if (percent > 70) {
+                barElem.style.background = '#f59e0b';
+            } else {
+                barElem.style.background = '#38bdf8';
+            }
+        }
+
+        const availElem = document.getElementById('ramAvailableText');
+        if (availElem) availElem.innerText = `Available: ${data.available_mem_mb} MB`;
+
+        const percentElem = document.getElementById('ramPercentText');
+        if (percentElem) percentElem.innerText = `${percent}% used`;
+
+        // 2. Active Desktop Containers vs Max Limit
+        const runningElem = document.getElementById('runningContainersCount');
+        if (runningElem) runningElem.innerText = data.running_containers;
+
+        const maxElem = document.getElementById('maxContainersLimit');
+        if (maxElem) maxElem.innerText = data.max_concurrent_sessions;
+
+        const slotElem = document.getElementById('containerSlotStatus');
+        if (slotElem) {
+            const slots = data.max_concurrent_sessions - data.running_containers;
+            if (slots > 0) {
+                slotElem.innerText = `${slots} slot${slots === 1 ? '' : 's'} available`;
+                slotElem.style.color = '#34d399';
+            } else {
+                slotElem.innerText = `Capacity reached (${data.running_containers}/${data.max_concurrent_sessions})`;
+                slotElem.style.color = '#f87171';
+            }
+        }
+
+        // 3. Max Concurrent Sessions Input
+        const inputMax = document.getElementById('inputMaxSessions');
+        if (inputMax && document.activeElement !== inputMax) {
+            inputMax.value = data.max_concurrent_sessions;
+        }
+
+        const hintElem = document.getElementById('recommendedMaxHint');
+        if (hintElem) {
+            hintElem.innerHTML = `Recommended max for this server: <strong>${data.recommended_max}</strong>`;
+        }
+
+        // 4. Status Badge
+        const badgeElem = document.getElementById('resourceStatusBadge');
+        if (badgeElem) {
+            if (!data.can_start) {
+                badgeElem.className = 'status-pill status-terminated';
+                badgeElem.innerText = data.running_containers >= data.max_concurrent_sessions ? 'At Capacity' : 'Low Memory';
+            } else {
+                badgeElem.className = 'status-pill status-active';
+                badgeElem.innerText = 'Optimal';
+            }
+        }
+    } catch (err) {
+        console.error('Failed to load system resources:', err);
+    }
+}
+
+async function saveMaxSessionsLimit() {
+    const input = document.getElementById('inputMaxSessions');
+    if (!input) return;
+    const limit = parseInt(input.value, 10);
+    if (isNaN(limit) || limit < 1) {
+        alert('Max concurrent sessions must be at least 1');
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/admin/resources', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ max_concurrent_sessions: limit }),
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || 'Failed to update concurrency limit');
+        }
+        showToast(`Concurrency limit updated to ${limit}`);
+        await loadSystemResources();
+    } catch (err) {
+        alert(`Error saving limit: ${err.message}`);
     }
 }
 

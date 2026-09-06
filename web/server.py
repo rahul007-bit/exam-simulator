@@ -25,7 +25,7 @@ from core.deployer import LabDeployer
 from core.grader import LabGrader
 from core.models import ExamSession, Question, GradeResult
 from core.recorder import recorder
-from core.redis_bus import bus as redis_bus
+from core.redis_bus import bus as redis_bus, get_system_resource_info
 from core.desktop_manager import desktop_mgr
 
 app = FastAPI(title="Kubernetes Exam Web Simulator", version="2.0.0")
@@ -314,6 +314,14 @@ def get_session(request: Request):
             "is_admin": is_admin,
         }
 
+    # Auto-Restore Container for Active Sessions
+    if session and session.session_id and session.status == "active":
+        if not is_container_running(session.session_id):
+            res_info = get_system_resource_info()
+            if res_info.get("available_mem_mb", 0) >= 350:
+                print(f"[AutoRestore] Container for active session {session.session_id} was not running. Automatically restored.", flush=True)
+                desktop_mgr.start_desktop(session.session_id)
+
     # Touch activity timestamp for idle timeout tracking
     now_utc = datetime.now(timezone.utc)
     try:
@@ -542,6 +550,13 @@ def action_jump(req: JumpRequest, request: Request):
     if target_idx < 0 or target_idx >= len(session.questions):
         raise HTTPException(status_code=400, detail=f"Task number {req.task_num} out of range")
 
+    actor = "admin" if is_admin_authenticated(request) else "candidate"
+    try:
+        recorder.attach_or_resume(session.session_id, session.name)
+        recorder.log_event("TASK_JUMP", {"task_num": req.task_num, "actor": actor}, actor=actor)
+    except Exception:
+        pass
+
     deployer.deploy_step(session, target_idx, progress_cb=_make_progress_cb(session.session_id))
     return get_session(request)
 
@@ -579,12 +594,13 @@ def action_flag(req: FlagRequest):
 
 
 @app.post("/api/action/retry")
-def action_retry():
+def action_retry(request: Request):
     session = deployer.load_active_session(loader)
     if not session or not session.current_question:
         raise HTTPException(status_code=400, detail="No active question to retry")
 
     cur_idx = session.current_index
+    actor = "admin" if is_admin_authenticated(request) else "candidate"
     try:
         cur_q = session.current_question
         recorder.attach_or_resume(session.session_id, session.name)
@@ -592,7 +608,8 @@ def action_retry():
             "task_num": cur_idx + 1,
             "question_id": cur_q.id if cur_q else None,
             "title": cur_q.title if cur_q else None,
-        })
+            "actor": actor,
+        }, actor=actor)
     except Exception:
         pass
     # Re-run deploy step for current index with forced setup reset
@@ -863,8 +880,27 @@ def start_exam(req: StartRequest, request: Request):
             if existing_session and existing_session.session_id == existing_sid and existing_session.status == "active":
                 return get_session(request)
 
-    # Archive any currently active session before starting a new one
+    # Resource check before starting a new session / container
     old_session = deployer.load_active_session(loader)
+    res_info = get_system_resource_info()
+    running = res_info["running_containers"]
+    max_sessions = res_info["max_concurrent_sessions"]
+    avail_mem = res_info["available_mem_mb"]
+
+    # Check if this start request is replacing an existing running desktop container
+    is_replacing_running = False
+    if old_session and old_session.session_id and is_container_running(old_session.session_id):
+        is_replacing_running = True
+
+    effective_running = (running - 1) if is_replacing_running else running
+
+    if effective_running >= max_sessions or avail_mem < 350:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Server resource limit reached: Maximum concurrent sessions ({max_sessions}) currently active ({running} running). Please wait for an active session to finish or contact the administrator."
+        )
+
+    # Archive any currently active session before starting a new one
     if old_session and old_session.session_id:
         try:
             desktop_mgr.stop_desktop(old_session.session_id)
@@ -939,10 +975,118 @@ def start_exam(req: StartRequest, request: Request):
     return get_session(request)
 
 
+class RestoreSessionRequest(BaseModel):
+    session_id: str
+
+
+@app.post("/api/session/restore")
+def restore_session(req: RestoreSessionRequest, request: Request):
+    session_id = req.session_id
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+
+    # Check resource limit before restoring
+    res_info = get_system_resource_info()
+    running = res_info["running_containers"]
+    max_sessions = res_info["max_concurrent_sessions"]
+    avail_mem = res_info["available_mem_mb"]
+
+    is_already_running = is_container_running(session_id)
+    effective_running = (running - 1) if is_already_running else running
+
+    if effective_running >= max_sessions or avail_mem < 350:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Server resource limit reached: Maximum concurrent sessions ({max_sessions}) currently active ({running} running). Please wait for an active session to finish or contact the administrator."
+        )
+
+    # Retrieve archived session from Redis history:{session_id} or file archive
+    data = None
+    if redis_bus.is_available():
+        data = redis_bus.get_archived_session(session_id)
+        if not data:
+            try:
+                raw = redis_bus.get_sync_client().get(f"session:{session_id}")
+                if raw:
+                    data = json.loads(raw)
+            except Exception:
+                pass
+
+    if not data:
+        archive_p = BASE_DIR / "var" / "archive" / f"{session_id}.json"
+        if archive_p.exists():
+            try:
+                data = json.loads(archive_p.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        elif deployer.session_file.exists():
+            try:
+                s_data = json.loads(deployer.session_file.read_text(encoding="utf-8"))
+                if s_data.get("session_id") == session_id:
+                    data = s_data
+            except Exception:
+                pass
+
+    if not data:
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found in history or archive")
+
+    q_ids = data.get("question_ids", [])
+    questions = [loader.get(qid) for qid in q_ids if loader.get(qid) is not None]
+
+    session = ExamSession(
+        session_id=session_id,
+        created_at=data.get("created_at", datetime.now(timezone.utc).isoformat()),
+        name=data.get("name", "Restored Exam Session"),
+        questions=questions,
+        target_contexts=data.get("target_contexts", []),
+        time_limit_minutes=data.get("time_limit_minutes"),
+        mode=data.get("mode", "sequential"),
+        current_index=data.get("current_index", 0),
+        scores=data.get("scores", {}),
+        flagged=data.get("flagged", []),
+        scorecard=data.get("scorecard"),
+        status="active",
+        last_active_at=datetime.now(timezone.utc).isoformat(),
+        candidate_token=data.get("candidate_token"),
+    )
+
+    # Revive session as active session in Redis & deployer.save_session
+    deployer.save_session(session)
+    if redis_bus.is_available():
+        redis_bus.set_session_state(session_id, session.to_dict())
+        redis_bus.register_active_session(session_id, session.to_dict())
+        if session.candidate_token:
+            _candidate_token_map[session.candidate_token] = session_id
+            try:
+                redis_bus.get_sync_client().set(f"token:{session.candidate_token}", session_id, ex=86400)
+            except Exception:
+                pass
+        redis_bus.touch_session_activity(session_id)
+
+    # Start desktop container
+    desktop_mgr.start_desktop(session_id)
+
+    actor = "admin" if is_admin_authenticated(request) else "candidate"
+    try:
+        recorder.attach_or_resume(session_id, session.name)
+        recorder.log_event("SESSION_RESTORED", {"session_id": session_id, "actor": actor}, actor=actor)
+    except Exception:
+        pass
+
+    print(f"[SessionRestore] Restored and revived session {session_id}", flush=True)
+    return get_session(request)
+
+
 @app.post("/api/reset")
-def reset_exam():
+def reset_exam(request: Request):
+    actor = "admin" if is_admin_authenticated(request) else "candidate"
     active_session = deployer.load_active_session(loader)
     if active_session and active_session.session_id:
+        try:
+            recorder.attach_or_resume(active_session.session_id, active_session.name)
+            recorder.log_event("EXAM_RESET", {"actor": actor}, actor=actor)
+        except Exception:
+            pass
         desktop_mgr.stop_desktop(active_session.session_id)
         try:
             redis_bus.archive_session(active_session.session_id, status="reset")
@@ -1030,10 +1174,39 @@ def admin_set_config(req: AdminConfigRequest, request: Request):
     return {"status": "ok", "default_preset": req.default_preset}
 
 
+class SetResourceLimitRequest(BaseModel):
+    max_concurrent_sessions: int
+
+
+@app.get("/api/admin/resources")
+def admin_get_resources(request: Request):
+    if not is_admin_authenticated(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return get_system_resource_info()
+
+
+@app.post("/api/admin/resources")
+def admin_set_resources(req: SetResourceLimitRequest, request: Request):
+    if not is_admin_authenticated(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    if req.max_concurrent_sessions < 1:
+        raise HTTPException(status_code=400, detail="max_concurrent_sessions must be at least 1")
+    redis_bus.set_max_concurrent_sessions(req.max_concurrent_sessions)
+    return get_system_resource_info()
+
+
 @app.post("/api/admin/sessions/create")
 def admin_create_session_invite(req: CreateSessionInviteRequest, request: Request):
     if not is_admin_authenticated(request):
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+    res_info = get_system_resource_info()
+    if res_info["running_containers"] >= res_info["max_concurrent_sessions"] or res_info["available_mem_mb"] < 350:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Server resource limit reached: Maximum concurrent sessions ({res_info['max_concurrent_sessions']}) currently active ({res_info['running_containers']} running). Please wait for an active session to finish or contact the administrator."
+        )
+
     preset = req.preset or redis_bus.get_default_preset()
     token = secrets.token_urlsafe(16)
     redis_bus.create_invitation(token, preset)
@@ -1199,6 +1372,12 @@ def admin_terminate_session(identifier: str, request: Request):
     if not is_admin_authenticated(request):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
+    try:
+        recorder.attach_or_resume(identifier)
+        recorder.log_event("ADMIN_SESSION_TERMINATE", {"session_id": identifier, "actor": "admin"}, actor="admin")
+    except Exception:
+        pass
+
     desktop_mgr.stop_desktop(identifier)
     redis_bus.archive_session(identifier, status="terminated")
 
@@ -1218,6 +1397,7 @@ async def terminal_websocket(websocket: WebSocket, session_id: Optional[str] = N
     await websocket.accept()
 
     is_admin = is_admin_authenticated(websocket)
+    actor = "admin" if is_admin else "candidate"
     param_sid = session_id or websocket.query_params.get("session_id")
     if is_admin and param_sid:
         sid = param_sid
@@ -1229,7 +1409,13 @@ async def terminal_websocket(websocket: WebSocket, session_id: Optional[str] = N
     if session:
         try:
             recorder.attach_or_resume(session.session_id, session.name)
-            recorder.log_event("TERMINAL_ATTACH", {"session_id": session.session_id})
+            recorder.log_event("ADMIN_TERMINAL_ATTACH" if is_admin else "TERMINAL_ATTACH", {"session_id": session.session_id, "actor": actor}, actor=actor)
+        except Exception:
+            pass
+    elif is_admin and sid:
+        try:
+            recorder.attach_or_resume(sid)
+            recorder.log_event("ADMIN_TERMINAL_ATTACH", {"session_id": sid, "actor": "admin"}, actor="admin")
         except Exception:
             pass
 
@@ -1355,7 +1541,7 @@ async def terminal_websocket(websocket: WebSocket, session_id: Optional[str] = N
                     if "bytes" in msg and msg["bytes"]:
                         os.write(master_fd, msg["bytes"])
                         try:
-                            recorder.record_input(msg["bytes"])
+                            recorder.record_input(msg["bytes"], actor=actor)
                         except Exception:
                             pass
                     elif "text" in msg and msg["text"]:
@@ -1374,7 +1560,7 @@ async def terminal_websocket(websocket: WebSocket, session_id: Optional[str] = N
                             raw_b = text.encode("utf-8")
                             os.write(master_fd, raw_b)
                             try:
-                                recorder.record_input(raw_b)
+                                recorder.record_input(raw_b, actor=actor)
                             except Exception:
                                 pass
                 except WebSocketDisconnect:
@@ -1393,7 +1579,7 @@ async def terminal_websocket(websocket: WebSocket, session_id: Optional[str] = N
             task.cancel()
 
         try:
-            recorder.log_event("TERMINAL_DETACH")
+            recorder.log_event("ADMIN_TERMINAL_DETACH" if is_admin else "TERMINAL_DETACH", {"session_id": sid, "actor": actor}, actor=actor)
         except Exception:
             pass
 
@@ -1440,8 +1626,15 @@ async def _proxy_vnc(websocket: WebSocket, session_id: Optional[str] = None):
     target_port = 5901
 
     if sid:
-        # Check Redis registration, wait up to 4s if container is currently registering
-        for _ in range(8):
+        # Auto-Restore Container for Active Sessions:
+        if not is_container_running(sid):
+            res_info = get_system_resource_info()
+            if res_info.get("available_mem_mb", 0) >= 350:
+                print(f"[AutoRestore] Container for active session {sid} was not running. Automatically restored.", flush=True)
+                desktop_mgr.start_desktop(sid)
+
+        # Check Redis registration, wait up to 8s if container is currently registering
+        for _ in range(16):
             desktop_info = redis_bus.get_desktop_info(sid)
             if desktop_info and "host" in desktop_info:
                 h = desktop_info["host"]

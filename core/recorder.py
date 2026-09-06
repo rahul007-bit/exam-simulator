@@ -208,8 +208,8 @@ class SessionRecorder:
                 except Exception:
                     pass
 
-    def record_input(self, data: Union[str, bytes]) -> None:
-        """Records candidate terminal keystrokes / input."""
+    def record_input(self, data: Union[str, bytes], actor: str = "candidate") -> None:
+        """Records terminal keystrokes / input with actor tagging."""
         if not self._active or not self._cast_fp:
             return
 
@@ -230,6 +230,13 @@ class SessionRecorder:
                     self._cast_fp.write(record_line)
                 except Exception:
                     pass
+
+        if actor == "admin":
+            self.log_event("ADMIN_TERMINAL_INPUT", {
+                "actor": "admin",
+                "length": len(data_str),
+                "preview": data_str[:50],
+            }, actor="admin")
 
     def record_resize(self, cols: int, rows: int) -> None:
         """Records terminal resize event."""
@@ -265,8 +272,8 @@ class SessionRecorder:
                 except Exception:
                     pass
 
-    def log_event(self, event_type: str, data: Optional[Dict[str, Any]] = None) -> None:
-        """Appends a structured event to the event log."""
+    def log_event(self, event_type: str, data: Optional[Dict[str, Any]] = None, actor: str = "candidate") -> None:
+        """Appends a structured event to the event log with explicit actor tracking."""
         rel_time = self._get_rel_time()
         now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -275,6 +282,7 @@ class SessionRecorder:
             "rel_time": rel_time,
             "rel_time_formatted": self.format_seconds(rel_time),
             "event": event_type,
+            "actor": actor,
             "session_id": self.session_id,
             "data": data or {},
         }

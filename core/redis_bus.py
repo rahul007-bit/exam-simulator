@@ -173,33 +173,22 @@ class RedisBus:
             return ""
 
     def register_active_session(self, session_id: str, session_meta: Dict[str, Any]) -> None:
-        """Saves session metadata in Redis hash session:{session_id} and adds to active_sessions."""
+        """Adds session_id to active_sessions set."""
         if not self.is_available():
             return
         try:
             client = self.get_sync_client()
-            client.hset(f"session:{session_id}", mapping={
-                "session_id": session_id,
-                "name": session_meta.get("name", "CKA Exam"),
-                "total_tasks": str(session_meta.get("total_tasks", 0)),
-                "start_timestamp": str(session_meta.get("start_timestamp", time.time())),
-                "end_timestamp": str(session_meta.get("end_timestamp", time.time() + 7200)),
-                "status": "active",
-                "meta": json.dumps(session_meta),
-            })
             client.sadd("active_sessions", session_id)
         except Exception as e:
             print(f"[RedisBus] Failed to register active session: {e}")
 
     def deregister_session(self, session_id: str) -> None:
-        """Removes session from active_sessions and marks state completed."""
+        """Removes session from active_sessions."""
         if not self.is_available():
             return
         try:
             client = self.get_sync_client()
             client.srem("active_sessions", session_id)
-            client.hset(f"session:{session_id}", "status", "completed")
-            client.expire(f"session:{session_id}", 86400)
             self.publish_session_event(session_id, {"type": "session_terminated", "session_id": session_id})
         except Exception:
             pass
@@ -548,6 +537,114 @@ class RedisBus:
         except Exception:
             pass
 
+    def get_max_concurrent_sessions(self) -> int:
+        """Retrieves maximum allowed concurrent desktop sessions (default: 1)."""
+        if self.is_available():
+            try:
+                client = self.get_sync_client()
+                val = client.get("config:max_concurrent_sessions")
+                if val is not None:
+                    return max(1, int(val))
+            except Exception:
+                pass
+        return 1
+
+    def set_max_concurrent_sessions(self, limit: int) -> bool:
+        """Sets maximum allowed concurrent desktop sessions in Redis."""
+        if not self.is_available():
+            return False
+        try:
+            client = self.get_sync_client()
+            client.set("config:max_concurrent_sessions", max(1, int(limit)))
+            return True
+        except Exception:
+            return False
+
+    def get_archived_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieves archived session data from Redis history."""
+        if not self.is_available():
+            return None
+        try:
+            client = self.get_sync_client()
+            raw = client.get(f"history:{session_id}")
+            if raw:
+                return json.loads(raw)
+        except Exception:
+            pass
+        return None
+
 
 # Global singleton instance
 bus = RedisBus()
+
+
+def get_system_resource_info() -> Dict[str, Any]:
+    """Inspects host memory and active desktop containers to compute concurrency capacity."""
+    total_mem_mb = 0
+    available_mem_mb = 0
+    free_mem_mb = 0
+    try:
+        import psutil
+        vm = psutil.virtual_memory()
+        total_mem_mb = int(vm.total / (1024 * 1024))
+        available_mem_mb = int(vm.available / (1024 * 1024))
+        free_mem_mb = int(vm.free / (1024 * 1024))
+    except Exception:
+        try:
+            with open("/proc/meminfo", "r") as f:
+                for line in f:
+                    parts = line.split(":")
+                    if len(parts) == 2:
+                        k = parts[0].strip()
+                        v = parts[1].strip().split()[0]
+                        if k == "MemTotal":
+                            total_mem_mb = int(v) // 1024
+                        elif k == "MemAvailable":
+                            available_mem_mb = int(v) // 1024
+                        elif k == "MemFree":
+                            free_mem_mb = int(v) // 1024
+        except Exception:
+            pass
+
+    used_mem_mb = max(0, total_mem_mb - available_mem_mb)
+
+    # Running desktop containers
+    running_containers = 0
+    try:
+        res = subprocess.run(
+            ["docker", "ps", "-q", "--filter", "name=cka-desktop-"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            running_containers = len([c for c in res.stdout.strip().splitlines() if c.strip()])
+    except Exception:
+        pass
+
+    # Read config:max_concurrent_sessions from Redis (default: 1)
+    max_concurrent_sessions = bus.get_max_concurrent_sessions()
+
+    # Recommended max: max(1, (available_ram_mb + current_containers * 600) // 700)
+    recommended_max = max(1, (available_mem_mb + running_containers * 600) // 700)
+
+    can_start = True
+    reason = "Resources available"
+    if running_containers >= max_concurrent_sessions:
+        can_start = False
+        reason = f"Maximum concurrent sessions ({max_concurrent_sessions}) currently active ({running_containers} running)"
+    elif available_mem_mb < 350:
+        can_start = False
+        reason = f"Low server memory ({available_mem_mb} MB available, minimum required is 350 MB)"
+
+    return {
+        "total_mem_mb": total_mem_mb,
+        "available_mem_mb": available_mem_mb,
+        "used_mem_mb": used_mem_mb,
+        "free_mem_mb": free_mem_mb,
+        "running_containers": running_containers,
+        "max_concurrent_sessions": max_concurrent_sessions,
+        "recommended_max": recommended_max,
+        "can_start": can_start,
+        "reason": reason,
+    }

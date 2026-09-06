@@ -56,21 +56,11 @@ function initSessionWebSocket(sessionId) {
                     const reason = data.reason || 'unknown';
                     const msg = data.message || 'Your exam session has ended.';
                     console.warn('[Session] Expired:', reason, msg);
-                    // Show a prominent overlay and reload to the start screen
-                    const overlay = document.createElement('div');
-                    overlay.style.cssText = [
-                        'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.85)',
-                        'display:flex;flex-direction:column;align-items:center;justify-content:center',
-                        'color:#fff;font-family:monospace;gap:16px;text-align:center;padding:32px'
-                    ].join(';');
-                    const icon = reason === 'idle_timeout' ? '⏸' : '⏰';
-                    overlay.innerHTML = `
-                        <div style="font-size:3rem">${icon}</div>
-                        <div style="font-size:1.4rem;font-weight:bold">Session Ended</div>
-                        <div style="font-size:1rem;opacity:0.8;max-width:420px">${msg}</div>
-                        <button onclick="location.reload()" style="margin-top:12px;padding:10px 28px;border:none;border-radius:6px;background:#3b82f6;color:#fff;font-size:1rem;cursor:pointer">Return to Start</button>
-                    `;
-                    document.body.appendChild(overlay);
+                    showSessionEndedModal(msg);
+                    currentSession = null;
+                    timeRemainingSeconds = 0;
+                } else if (data.type === 'session_terminated') {
+                    showSessionEndedModal('Your exam session was terminated by an administrator.');
                     currentSession = null;
                     timeRemainingSeconds = 0;
                 }
@@ -166,6 +156,13 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('message', (e) => {
         if (e.data && e.data.type === 'VNC_CLIPBOARD' && typeof e.data.text === 'string') {
             handleIncomingVncClipboard(e.data.text, false);
+        }
+        if (e.data && e.data.type === 'VNC_DISCONNECTED') {
+            fetch('/api/session').then(r => r.json()).then(data => {
+                if (!data.active) {
+                    showSessionEndedModal('Your session has ended or is not active.');
+                }
+            }).catch(() => {});
         }
     });
 
@@ -552,6 +549,9 @@ async function loadSession() {
 
         if (data.active && data.current_task) {
             currentSession = data;
+            if (data.session_id) {
+                localStorage.setItem('cka_last_session_id', data.session_id);
+            }
             updateUIWithSession(data);
             initTimer(data.time_remaining_seconds, data);
             // If candidate rejoins active session without fullscreen, prompt immediately
@@ -565,6 +565,12 @@ async function loadSession() {
                 candidateUrlToken = data.token;
             }
             renderStartScreen(currentSelectedPreset, data.is_admin, data.invited, candidateUrlToken);
+
+            const lastSid = localStorage.getItem('cka_last_session_id');
+            const wasSubmitted = localStorage.getItem('cka_session_submitted');
+            if (lastSid && !wasSubmitted && !data.invited && !isAdminUser) {
+                showSessionEndedModal('Your session has ended or is not active.');
+            }
         }
     } catch (err) {
         console.error('Failed to load session:', err);
@@ -672,9 +678,24 @@ async function startAssignedExam(presetFilename, tokenParam) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
         });
+
+        if (res.status === 429) {
+            let detail = 'Maximum concurrent sessions active';
+            try {
+                const errData = await res.json();
+                if (errData && errData.detail) detail = errData.detail;
+            } catch (_) {}
+            showCapacityLimitModal(detail);
+            return;
+        }
+
         if (!res.ok) throw new Error(await res.text());
         const data = await res.json();
         currentSession = data;
+        localStorage.removeItem('cka_session_submitted');
+        if (data.session_id) {
+            localStorage.setItem('cka_last_session_id', data.session_id);
+        }
         updateUIWithSession(data);
         initTimer(data.time_remaining_seconds, data);
         if (data.session_id) {
@@ -682,6 +703,93 @@ async function startAssignedExam(presetFilename, tokenParam) {
         }
     } catch (err) {
         alert(`Failed to start exam: ${err.message}`);
+    } finally {
+        setLoadingState(false);
+    }
+}
+
+function showCapacityLimitModal(reason) {
+    const msgElem = document.getElementById('capacityLimitMessage');
+    if (msgElem) {
+        msgElem.innerText = `Server Capacity Reached. All test environments are currently in use (${reason}). Please wait a few minutes and try again.`;
+    }
+    openModal('modalCapacityLimit');
+}
+
+function showSessionEndedModal(reason) {
+    const msgElem = document.getElementById('sessionEndedMessage');
+    if (msgElem) {
+        msgElem.innerText = reason || 'Your session has ended or is not active.';
+    }
+
+    const restoreBtn = document.getElementById('btnRestorePreviousSession');
+    const lastSessionId = localStorage.getItem('cka_last_session_id');
+    if (restoreBtn) {
+        if (lastSessionId) {
+            restoreBtn.style.display = 'inline-flex';
+            restoreBtn.innerText = `Restore Session #${lastSessionId}`;
+        } else {
+            restoreBtn.style.display = 'none';
+        }
+    }
+    openModal('modalSessionEnded');
+}
+
+function hideSessionEndedModal() {
+    closeModal('modalSessionEnded');
+}
+
+function onStartNewExamFromEnded() {
+    hideSessionEndedModal();
+    localStorage.removeItem('cka_last_session_id');
+    localStorage.removeItem('cka_session_submitted');
+    openStartModal();
+}
+
+async function onRestorePreviousSession() {
+    const lastSessionId = localStorage.getItem('cka_last_session_id');
+    if (!lastSessionId) {
+        alert('No previous session found to restore.');
+        return;
+    }
+
+    setLoadingState(true, 'Restoring Session', `Recovering session #${lastSessionId} and restoring desktop container...`);
+    try {
+        const res = await fetch('/api/session/restore', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: lastSessionId }),
+        });
+
+        if (res.status === 429) {
+            let detail = 'Maximum concurrent sessions active';
+            try {
+                const errData = await res.json();
+                if (errData && errData.detail) detail = errData.detail;
+            } catch (_) {}
+            hideSessionEndedModal();
+            showCapacityLimitModal(detail);
+            return;
+        }
+
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || 'Failed to restore session');
+        }
+
+        const data = await res.json();
+        currentSession = data;
+        hideSessionEndedModal();
+        localStorage.removeItem('cka_session_submitted');
+        if (data.session_id) {
+            localStorage.setItem('cka_last_session_id', data.session_id);
+            initSessionWebSocket(data.session_id);
+        }
+        updateUIWithSession(data);
+        initTimer(data.time_remaining_seconds, data);
+        reloadWorkspaceFrame();
+    } catch (err) {
+        alert(`Could not restore previous session: ${err.message}`);
     } finally {
         setLoadingState(false);
     }
@@ -1067,6 +1175,7 @@ async function onSubmitExam(force = false) {
         const res = await fetch('/api/action/submit', { method: 'POST' });
         if (!res.ok) throw new Error(await res.text());
         const result = await res.json();
+        localStorage.setItem('cka_session_submitted', '1');
         renderScorecard(result);
     } catch (err) {
         alert(`Submission error: ${err.message}`);

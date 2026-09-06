@@ -179,5 +179,38 @@ class DesktopManager:
         except Exception:
             pass
 
+    def is_desktop_running(self, session_id: str) -> bool:
+        """Checks if desktop container for session_id is currently running."""
+        if not session_id or not self.is_docker_available():
+            return False
+        container_name = f"cka-desktop-{session_id}"
+        try:
+            res = subprocess.run(
+                ["docker", "inspect", "-f", "{{.State.Running}}", container_name],
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            return res.returncode == 0 and "true" in res.stdout.lower()
+        except Exception:
+            return False
+
+    def count_running_desktops(self) -> int:
+        """Counts how many cka-desktop-* containers are actively running."""
+        if not self.is_docker_available():
+            return 0
+        try:
+            res = subprocess.run(
+                ["docker", "ps", "-q", "--filter", "name=cka-desktop-"],
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+            if res.returncode == 0 and res.stdout.strip():
+                return len([c for c in res.stdout.strip().splitlines() if c.strip()])
+        except Exception:
+            pass
+        return 0
+
 
 desktop_mgr = DesktopManager()

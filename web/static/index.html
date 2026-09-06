@@ -345,6 +345,35 @@
         </div>
     </div>
 
+    <!-- Server Capacity Reached Modal (HTTP 429) -->
+    <div class="modal-backdrop" id="modalCapacityLimit" style="display:none; z-index: 100000;">
+        <div class="modal-dialog modal-small" style="text-align: center; padding: 28px 24px; max-width: 480px;">
+            <div style="font-size: 3rem; margin-bottom: 12px;">⏳</div>
+            <h2 style="font-size: 1.35rem; font-weight: 700; color: #f87171; margin-bottom: 8px;">Server Capacity Reached</h2>
+            <p id="capacityLimitMessage" style="font-size: 0.9rem; color: #cbd5e1; line-height: 1.5; margin-bottom: 20px;">
+                All test environments are currently in use. Please wait a few minutes and try again.
+            </p>
+            <div style="display: flex; gap: 10px; justify-content: center;">
+                <button class="btn btn-primary" onclick="closeModal('modalCapacityLimit')">Understood</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Session Inactive / Ended Modal -->
+    <div class="modal-backdrop" id="modalSessionEnded" style="display:none; z-index: 100000;">
+        <div class="modal-dialog modal-small" style="text-align: center; padding: 28px 24px; max-width: 480px;">
+            <div style="font-size: 3rem; margin-bottom: 12px;">⏹</div>
+            <h2 style="font-size: 1.35rem; font-weight: 700; color: #38bdf8; margin-bottom: 8px;">Session Inactive or Ended</h2>
+            <p id="sessionEndedMessage" style="font-size: 0.9rem; color: #cbd5e1; line-height: 1.5; margin-bottom: 20px;">
+                Your session has ended or is not active.
+            </p>
+            <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+                <button class="btn btn-primary" onclick="onStartNewExamFromEnded()">Start New Exam</button>
+                <button class="btn btn-warning" id="btnRestorePreviousSession" style="display:none;" onclick="onRestorePreviousSession()">Restore Previous Session</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Global Loading & Action HUD Overlay -->
     <div class="global-loading-overlay" id="globalLoadingOverlay">
         <div class="loading-card">
