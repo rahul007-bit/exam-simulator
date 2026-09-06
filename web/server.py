@@ -1267,12 +1267,22 @@ def admin_list_sessions(request: Request):
 
     # 2. Invitations
     invitations = redis_bus.list_invitations()
+    now_ts = time.time()
     for inv in invitations:
         token = inv.get("token")
         status = inv.get("status", "pending")
-        if status == "pending" or (token not in seen_tokens and status != "started"):
+        created_ts = inv.get("created_at") or now_ts
+
+        # Automatically expire pending invites older than 24 hours (86400s)
+        if status == "pending" and (now_ts - created_ts > 86400):
+            status = "expired"
+            try:
+                redis_bus.update_invitation(token, {"status": "expired"})
+            except Exception:
+                pass
+
+        if status in ("pending", "expired") or (token not in seen_tokens and status != "started"):
             seen_tokens.add(token)
-            created_ts = inv.get("created_at")
             created_str = datetime.fromtimestamp(created_ts, tz=timezone.utc).isoformat() if created_ts else ""
             items.append({
                 "session_id": None,
@@ -1403,7 +1413,16 @@ def admin_terminate_session(identifier: str, request: Request):
         deployer.clear_session(cleanup_cluster=False)
 
     redis_bus.delete_invitation(identifier)
-    return {"status": "ok", "message": f"Session or invite {identifier} terminated"}
+    if redis_bus.is_available():
+        try:
+            client = redis_bus.get_sync_client()
+            client.delete(f"history:{identifier}")
+            client.delete(f"token:{identifier}")
+            client.delete(f"session:{identifier}")
+            client.delete(f"session:{identifier}:state")
+        except Exception:
+            pass
+    return {"status": "ok", "message": f"Session or invite {identifier} deleted/terminated"}
 
 
 @app.post("/api/admin/sessions/{identifier}/reset")

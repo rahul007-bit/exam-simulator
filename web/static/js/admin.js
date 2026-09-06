@@ -405,25 +405,24 @@ async function loadAdminSessions() {
             const isRunning = !!item.container_running;
             const fullLink = item.url ? (item.url.startsWith('http') ? item.url : `${window.location.origin}${item.url}`) : '';
 
-            // Status Pill
+            // Status Pill (Pure CSS, NO emojis)
             let statusClass = 'status-ended';
-            let statusIcon = '⚫';
             if (status === 'active') {
                 statusClass = 'status-active';
-                statusIcon = '🟢';
             } else if (status === 'pending') {
                 statusClass = 'status-pending';
-                statusIcon = '🟡';
+            } else if (status === 'expired') {
+                statusClass = 'status-expired';
             }
-            const statusPill = `<span class="status-pill ${statusClass}">${statusIcon} ${status}</span>`;
+            const statusPill = `<span class="status-pill ${statusClass}"><span class="status-dot"></span>${escapeHtml(status.toUpperCase())}</span>`;
 
-            // Container State
-            let containerBadge = '<span class="container-badge container-na">N/A</span>';
+            // Container State (Pure CSS, NO emojis)
+            let containerBadge = '<span class="container-badge container-na"><span class="container-dot"></span>N/A</span>';
             if (sid) {
                 if (isRunning) {
-                    containerBadge = '<span class="container-badge container-running">● Running</span>';
+                    containerBadge = '<span class="container-badge container-running"><span class="container-dot"></span>Running</span>';
                 } else {
-                    containerBadge = '<span class="container-badge container-stopped">■ Stopped</span>';
+                    containerBadge = '<span class="container-badge container-stopped"><span class="container-dot"></span>Stopped</span>';
                 }
             }
 
@@ -454,38 +453,97 @@ async function loadAdminSessions() {
                 } catch (_) {}
             }
 
-            // Actions
-            let actionsHtml = `<div class="table-actions">`;
-            if (fullLink) {
-                actionsHtml += `
-                    <button class="btn btn-secondary btn-sm" title="Copy Candidate Invite Link" onclick="copyToClipboard('${fullLink}', 'Candidate link copied!')">
-                        Copy Link
+            // Sleek Actions Dropdown Menu (No Emojis)
+            const menuId = `menu_${idx}`;
+            let actionsHtml = `
+                <div class="table-action-menu" id="${menuId}">
+                    <button class="btn-action-dropdown" onclick="toggleTableRowMenu(event, '${menuId}')">
+                        Actions ▾
                     </button>
-                `;
-            }
+                    <div class="action-dropdown-list">
+            `;
+
             if (status === 'active' && sid) {
                 actionsHtml += `
-                    <button class="btn btn-observe btn-sm" title="Observe Candidate in View-Only Mode" onclick="openObserveView('${sid}', '${tok}', '${escapeHtml(item.name || '')}')">
-                        👁 Observe
+                    <button class="action-dropdown-item" onclick="closeAllActionMenus(); openObserveView('${sid}', '${tok}', '${escapeHtml(item.name || '')}')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                        Observe Live
+                    </button>
+                    <button class="action-dropdown-item" onclick="closeAllActionMenus(); openReviewModal('${sid}')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                        Review & Replay
                     </button>
                 `;
-            }
-            if (sid) {
+                if (fullLink) {
+                    actionsHtml += `
+                        <button class="action-dropdown-item" onclick="closeAllActionMenus(); copyToClipboard('${fullLink}', 'Candidate link copied!')">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            Copy Candidate Link
+                        </button>
+                    `;
+                }
                 actionsHtml += `
-                    <button class="btn btn-secondary btn-sm" title="Review & Replay Candidate Session" onclick="openReviewModal('${sid}')">
-                        ▶ Replay
+                    <div class="action-dropdown-divider"></div>
+                    <button class="action-dropdown-item danger" onclick="closeAllActionMenus(); resetSessionPrompt('${sid}')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                        Reset Exam
+                    </button>
+                    <button class="action-dropdown-item danger" onclick="closeAllActionMenus(); endSessionPrompt('${sid}')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></svg>
+                        End & Grade
                     </button>
                 `;
-            }
-            const termIdentifier = sid || tok;
-            if (status === 'active' || status === 'pending') {
+            } else if (status === 'pending') {
+                if (fullLink) {
+                    actionsHtml += `
+                        <button class="action-dropdown-item" onclick="closeAllActionMenus(); copyToClipboard('${fullLink}', 'Candidate link copied!')">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            Copy Invite Link
+                        </button>
+                        <a class="action-dropdown-item" href="${fullLink}" target="_blank" onclick="closeAllActionMenus()" style="text-decoration:none;">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                            Open Candidate View
+                        </a>
+                        <div class="action-dropdown-divider"></div>
+                    `;
+                }
                 actionsHtml += `
-                    <button class="btn btn-terminate btn-sm" title="Terminate or Cancel Session" onclick="terminateSessionPrompt('${termIdentifier}')">
-                        ⏹ End
+                    <button class="action-dropdown-item danger" onclick="closeAllActionMenus(); terminateSessionPrompt('${tok || sid}')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                        Cancel Invite
+                    </button>
+                `;
+            } else {
+                // Ended / Expired / Replaced
+                if (sid) {
+                    actionsHtml += `
+                        <button class="action-dropdown-item" onclick="closeAllActionMenus(); openReviewModal('${sid}')">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                            Review & Replay
+                        </button>
+                    `;
+                }
+                if (fullLink) {
+                    actionsHtml += `
+                        <button class="action-dropdown-item" onclick="closeAllActionMenus(); copyToClipboard('${fullLink}', 'Candidate link copied!')">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            Copy Link
+                        </button>
+                    `;
+                }
+                actionsHtml += `
+                    <div class="action-dropdown-divider"></div>
+                    <button class="action-dropdown-item danger" onclick="closeAllActionMenus(); terminateSessionPrompt('${sid || tok}')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                        Delete Record
                     </button>
                 `;
             }
-            actionsHtml += `</div>`;
+
+            actionsHtml += `
+                    </div>
+                </div>
+            `;
 
             const displaySid = sid ? `<span class="code-cell" onclick="copyToClipboard('${sid}')" title="Click to copy">${sid.slice(0, 14)}...</span>` : '<span style="color:#64748b;">Pending</span>';
             const displayTok = tok ? `<span class="code-cell" style="color:#38bdf8;" onclick="copyToClipboard('${tok}')" title="Click to copy">${tok.slice(0, 12)}...</span>` : '—';
@@ -518,7 +576,7 @@ async function loadAdminSessions() {
 
 async function terminateSessionPrompt(identifier) {
     if (!identifier) return;
-    if (!confirm(`Are you sure you want to terminate or cancel session/invite: ${identifier}?`)) {
+    if (!confirm(`Are you sure you want to terminate or delete session/invite: ${identifier}?`)) {
         return;
     }
     try {
@@ -526,10 +584,67 @@ async function terminateSessionPrompt(identifier) {
             method: 'POST',
         });
         if (!res.ok) throw new Error(await res.text());
-        showToast(`Session ${identifier} terminated`);
+        showToast(`Record ${identifier} removed`);
         await loadAdminSessions();
     } catch (err) {
         alert(`Failed to terminate: ${err.message}`);
+    }
+}
+
+window.toggleTableRowMenu = function (e, menuId) {
+    e.stopPropagation();
+    const menuEl = document.getElementById(menuId);
+    if (!menuEl) return;
+    const list = menuEl.querySelector('.action-dropdown-list');
+    if (!list) return;
+    const wasOpen = list.classList.contains('show');
+    closeAllActionMenus();
+    if (!wasOpen) {
+        list.classList.add('show');
+    }
+};
+
+window.closeAllActionMenus = function () {
+    document.querySelectorAll('.action-dropdown-list.show').forEach(el => el.classList.remove('show'));
+};
+
+document.addEventListener('click', () => closeAllActionMenus());
+
+async function resetSessionPrompt(sessionId) {
+    if (!sessionId) return;
+    if (!confirm(`Reset exam for session #${sessionId}?\n\nThis will clear the active exam and reset cluster namespaces.`)) {
+        return;
+    }
+    try {
+        const res = await fetch(`/api/admin/sessions/${encodeURIComponent(sessionId)}/reset`, {
+            method: 'POST',
+        });
+        if (!res.ok) throw new Error(await res.text());
+        showToast(`Session ${sessionId} reset and cluster cleaned`);
+        await loadAdminSessions();
+    } catch (err) {
+        alert(`Failed to reset exam: ${err.message}`);
+    }
+}
+
+async function endSessionPrompt(sessionId) {
+    if (!sessionId) return;
+    if (!confirm(`End and evaluate session #${sessionId} now?\n\nThis will evaluate candidate tasks and archive the session.`)) {
+        return;
+    }
+    try {
+        const res = await fetch(`/api/admin/sessions/${encodeURIComponent(sessionId)}/end`, {
+            method: 'POST',
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        showToast(`Session ${sessionId} ended and evaluated`);
+        if (data.scorecard) {
+            renderAdminScorecard(data.scorecard);
+        }
+        await loadAdminSessions();
+    } catch (err) {
+        alert(`Failed to end exam: ${err.message}`);
     }
 }
 
@@ -595,7 +710,7 @@ async function refreshObserveData(sessionId) {
                 return `
                     <div style="padding: 6px 10px; border-radius: 4px; background: ${bg}; border: ${border}; font-size: 0.76rem; display: flex; justify-content: space-between; align-items: center;">
                         <span><strong>#${q.task_num}</strong> ${escapeHtml(q.title)}</span>
-                        <span>${isFlagged ? '🚩' : ''} ${q.points}pts</span>
+                        <span>${isFlagged ? '<span style="color:#f59e0b;font-weight:700;margin-right:4px;">[FLAG]</span>' : ''}${q.points}pts</span>
                     </div>
                 `;
             }).join('');
@@ -877,9 +992,14 @@ function renderAdminScorecard(scorecard) {
 
     content.innerHTML = `
         <div style="text-align: center; margin-bottom: 20px;">
-            <div style="font-size: 2.8rem; margin-bottom: 8px;">${passed ? '🎉' : '📋'}</div>
-            <h3 style="font-size: 1.3rem; margin-bottom: 6px; color: ${passed ? '#34d399' : '#f87171'};">
-                Candidate Result: ${passed ? 'PASSED' : 'FAILED'} (${pct}%)
+            <div style="margin-bottom: 12px;">
+                <span class="status-pill ${passed ? 'status-active' : 'status-terminated'}" style="font-size: 0.95rem; padding: 6px 16px;">
+                    <span class="status-dot" style="width: 8px; height: 8px;"></span>
+                    ${passed ? 'EXAM PASSED' : 'EXAM FAILED'}
+                </span>
+            </div>
+            <h3 style="font-size: 1.35rem; margin-bottom: 6px; color: ${passed ? '#34d399' : '#f87171'};">
+                Final Score: ${pct}%
             </h3>
             <div style="font-size: 0.9rem; color: #94a3b8;">
                 Points: <strong>${score}</strong> / ${maxScore} | Exam: ${escapeHtml(scorecard.name || 'Exam Drill')}
@@ -1143,7 +1263,7 @@ function playReplay() {
     replayIsPlaying = true;
     replayLastFrameTime = performance.now();
     const icon = document.getElementById('replayPlayIcon');
-    if (icon) icon.innerText = '⏸ Pause';
+    if (icon) icon.innerText = 'Pause';
     const btn = document.getElementById('btnReplayPlayPause');
     if (btn) btn.classList.remove('primary');
     replayTick();
@@ -1156,7 +1276,7 @@ function pauseReplay() {
         replayAnimFrameId = null;
     }
     const icon = document.getElementById('replayPlayIcon');
-    if (icon) icon.innerText = '▶ Play';
+    if (icon) icon.innerText = 'Play';
     const btn = document.getElementById('btnReplayPlayPause');
     if (btn) btn.classList.add('primary');
 }

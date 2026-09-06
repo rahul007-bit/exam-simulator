@@ -348,7 +348,11 @@
     <!-- Server Capacity Reached Modal (HTTP 429) -->
     <div class="modal-backdrop" id="modalCapacityLimit" style="display:none; z-index: 100000;">
         <div class="modal-dialog modal-small" style="text-align: center; padding: 28px 24px; max-width: 480px;">
-            <div style="font-size: 3rem; margin-bottom: 12px;">⏳</div>
+            <div style="display: flex; justify-content: center; margin-bottom: 14px;">
+                <div style="width: 52px; height: 52px; border-radius: 50%; background: rgba(239, 68, 68, 0.12); display: flex; align-items: center; justify-content: center; border: 1px solid rgba(239, 68, 68, 0.3);">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2" style="width: 26px; height: 26px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                </div>
+            </div>
             <h2 style="font-size: 1.35rem; font-weight: 700; color: #f87171; margin-bottom: 8px;">Server Capacity Reached</h2>
             <p id="capacityLimitMessage" style="font-size: 0.9rem; color: #cbd5e1; line-height: 1.5; margin-bottom: 20px;">
                 All test environments are currently in use. Please wait a few minutes and try again.
@@ -362,7 +366,11 @@
     <!-- Session Inactive / Ended Modal -->
     <div class="modal-backdrop" id="modalSessionEnded" style="display:none; z-index: 100000;">
         <div class="modal-dialog modal-small" style="text-align: center; padding: 28px 24px; max-width: 480px;">
-            <div style="font-size: 3rem; margin-bottom: 12px;">⏹</div>
+            <div style="display: flex; justify-content: center; margin-bottom: 14px;">
+                <div style="width: 52px; height: 52px; border-radius: 50%; background: rgba(56, 189, 248, 0.12); display: flex; align-items: center; justify-content: center; border: 1px solid rgba(56, 189, 248, 0.3);">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" style="width: 26px; height: 26px;"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></svg>
+                </div>
+            </div>
             <h2 style="font-size: 1.35rem; font-weight: 700; color: #38bdf8; margin-bottom: 8px;">Session Inactive or Ended</h2>
             <p id="sessionEndedMessage" style="font-size: 0.9rem; color: #cbd5e1; line-height: 1.5; margin-bottom: 20px;">
                 Your session has ended or is not active.
