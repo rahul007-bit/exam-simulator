@@ -95,6 +95,28 @@ body.dark-theme {
     font-weight: 500;
 }
 
+.session-id-badge {
+    background: rgba(30, 41, 59, 0.8);
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    padding: 3px 10px;
+    border-radius: 6px;
+    font-size: 0.76rem;
+    font-family: var(--font-code);
+    color: var(--accent-blue);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+    user-select: all;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.session-id-badge:hover {
+    border-color: var(--accent-blue);
+    background: rgba(56, 189, 248, 0.12);
+}
+
 /* Timer */
 .timer-card {
     background: #0b111a;

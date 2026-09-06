@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -101,9 +101,10 @@ class FlagRequest(BaseModel):
 
 
 class StartRequest(BaseModel):
-    preset: Optional[str] = "mock-01-acme"
+    preset: Optional[str] = None
     all_questions: Optional[bool] = False
     question_ids: Optional[List[str]] = None
+    candidate_token: Optional[str] = None
 
 
 class PresetSelectRequest(BaseModel):
@@ -112,6 +113,71 @@ class PresetSelectRequest(BaseModel):
 
 class ClipboardRequest(BaseModel):
     text: str
+
+
+class AdminLoginRequest(BaseModel):
+    password: str
+
+
+class AdminConfigRequest(BaseModel):
+    default_preset: str
+
+
+class CreateSessionInviteRequest(BaseModel):
+    preset: Optional[str] = None
+
+
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
+_admin_tokens: set = set()
+
+
+def is_admin_authenticated(req_or_ws) -> bool:
+    """Checks if request or websocket carries valid admin credentials."""
+    # 1. Cookie check
+    cookie_token = None
+    if hasattr(req_or_ws, "cookies") and req_or_ws.cookies:
+        cookie_token = req_or_ws.cookies.get("admin_token")
+    if cookie_token:
+        if cookie_token in _admin_tokens or redis_bus.verify_admin_token(cookie_token):
+            return True
+
+    # 2. Authorization Bearer header
+    headers = getattr(req_or_ws, "headers", {}) or {}
+    auth_header = headers.get("authorization", "") or headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:].strip()
+        if token in _admin_tokens or redis_bus.verify_admin_token(token):
+            return True
+
+    # 3. Query param check (e.g. for WebSockets or iframes)
+    params = getattr(req_or_ws, "query_params", {}) or {}
+    q_token = params.get("admin_token")
+    if q_token:
+        if q_token in _admin_tokens or redis_bus.verify_admin_token(q_token):
+            return True
+
+    # 4. Fallback to EXAM_ADMIN env
+    if os.getenv("EXAM_ADMIN", "0").lower() in ("1", "true"):
+        return True
+
+    return False
+
+
+def is_container_running(sid: Optional[str]) -> bool:
+    """Checks whether the docker desktop container for the session is actively running."""
+    if not sid or sid == "None":
+        return False
+    container_name = f"cka-desktop-{sid}"
+    try:
+        r = subprocess.run(
+            ["docker", "inspect", "-f", "{{.State.Running}}", container_name],
+            capture_output=True,
+            text=True,
+            timeout=1,
+        )
+        return r.returncode == 0 and "true" in r.stdout.lower()
+    except Exception:
+        return False
 
 
 # Idle timeout: auto-kill container + session after this many minutes of inactivity
@@ -132,7 +198,8 @@ _selected_preset_override: Optional[str] = None
 
 def _get_locked_preset_info(override_preset: Optional[str] = None) -> Dict[str, Any]:
     global _selected_preset_override
-    preset_key = override_preset or _selected_preset_override or os.getenv("EXAM_PRESET", "mock-01-acme")
+    default_cfg = redis_bus.get_default_preset() if redis_bus.is_available() else "mock-01-acme"
+    preset_key = override_preset or _selected_preset_override or os.getenv("EXAM_PRESET") or default_cfg
     if preset_key == "all":
         return {
             "filename": "all",
@@ -173,12 +240,13 @@ def get_session(request: Request):
     url_preset = request.query_params.get("preset")
     url_token = request.query_params.get("token")  # Per-candidate session token
 
-    if url_admin in ("1", "true", "yes"):
+    admin_auth = is_admin_authenticated(request)
+    if url_admin in ("1", "true", "yes") and admin_auth:
         is_admin = True
     elif url_candidate in ("1", "true", "yes"):
         is_admin = False
     else:
-        is_admin = os.getenv("EXAM_ADMIN", "0") == "1"
+        is_admin = admin_auth
 
     # Candidate token routing: resolve session_id from token
     session = None
@@ -186,12 +254,14 @@ def get_session(request: Request):
         sid_for_token = _candidate_token_map.get(url_token)
         if not sid_for_token and redis_bus.is_available():
             try:
-                sid_for_token = redis_bus.get_sync_client().get(f"token:{url_token}")
+                sid_val = redis_bus.get_sync_client().get(f"token:{url_token}")
+                if sid_val:
+                    sid_for_token = sid_val if isinstance(sid_val, str) else sid_val.decode()
             except Exception:
                 pass
         if sid_for_token:
             state = redis_bus.get_session_state(sid_for_token)
-            if state:
+            if state and state.get("status") == "active":
                 q_ids = state.get("question_ids", [])
                 questions = [loader.get(qid) for qid in q_ids if loader.get(qid) is not None]
                 from core.models import ExamSession
@@ -212,8 +282,27 @@ def get_session(request: Request):
                     candidate_token=state.get("candidate_token"),
                 )
 
-    if session is None:
+    if session is None and not url_token:
         session = deployer.load_active_session(loader)
+    elif session is None and url_token:
+        active_s = deployer.load_active_session(loader)
+        if active_s and getattr(active_s, "candidate_token", None) == url_token and active_s.status == "active":
+            session = active_s
+
+    # If no active session found but candidate token has an invitation
+    if session is None and url_token:
+        invitation = redis_bus.get_invitation(url_token)
+        if invitation:
+            assigned_preset = invitation.get("preset") or redis_bus.get_default_preset()
+            preset_info = _get_locked_preset_info(assigned_preset)
+            return {
+                "active": False,
+                "invited": True,
+                "preset": assigned_preset,
+                "token": url_token,
+                "locked_preset": preset_info,
+                "is_admin": is_admin,
+            }
 
     preset_info = _get_locked_preset_info(url_preset)
 
@@ -353,7 +442,8 @@ def get_presets():
     for p in presets:
         if "task_count" not in p:
             p["task_count"] = len(p.get("questions", []))
-    selected = _selected_preset_override or os.getenv("EXAM_PRESET", "mock-01-acme")
+    default_cfg = redis_bus.get_default_preset() if redis_bus.is_available() else "mock-01-acme"
+    selected = _selected_preset_override or os.getenv("EXAM_PRESET") or default_cfg
     return {"presets": presets, "selected": selected}
 
 
@@ -757,6 +847,22 @@ def log_client_event_endpoint(session_id: str, req: ClientEventRequest):
 
 @app.post("/api/start")
 def start_exam(req: StartRequest, request: Request):
+    cand_tok = req.candidate_token
+    # If candidate token is provided, check if session already active for it
+    if cand_tok:
+        existing_sid = _candidate_token_map.get(cand_tok)
+        if not existing_sid and redis_bus.is_available():
+            try:
+                sid_val = redis_bus.get_sync_client().get(f"token:{cand_tok}")
+                if sid_val:
+                    existing_sid = sid_val if isinstance(sid_val, str) else sid_val.decode()
+            except Exception:
+                pass
+        if existing_sid:
+            existing_session = deployer.load_active_session(loader)
+            if existing_session and existing_session.session_id == existing_sid and existing_session.status == "active":
+                return get_session(request)
+
     # Archive any currently active session before starting a new one
     old_session = deployer.load_active_session(loader)
     if old_session and old_session.session_id:
@@ -766,7 +872,17 @@ def start_exam(req: StartRequest, request: Request):
         except Exception:
             pass
 
-    if req.all_questions:
+    # Preset selection: request preset > candidate invitation preset > global default
+    preset_name = req.preset
+    if cand_tok and not preset_name:
+        inv = redis_bus.get_invitation(cand_tok)
+        if inv and inv.get("preset"):
+            preset_name = inv.get("preset")
+
+    if not preset_name:
+        preset_name = redis_bus.get_default_preset()
+
+    if req.all_questions or preset_name == "all":
         questions = loader.get_all()
         session = deployer.deploy_sequential(
             questions,
@@ -783,7 +899,6 @@ def start_exam(req: StartRequest, request: Request):
             time_limit_minutes=None,
         )
     else:
-        preset_name = req.preset or "mock-01-acme"
         preset_data = selector.load_preset(preset_name)
         if not preset_data:
             raise HTTPException(status_code=404, detail=f"Preset '{preset_name}' not found")
@@ -796,8 +911,7 @@ def start_exam(req: StartRequest, request: Request):
         )
 
     if session and session.session_id:
-        # Generate a unique per-candidate token for URL-based session isolation
-        token = secrets.token_urlsafe(16)
+        token = cand_tok or secrets.token_urlsafe(16)
         session.candidate_token = token
         session.status = "active"
         session.last_active_at = datetime.now(timezone.utc).isoformat()
@@ -810,6 +924,12 @@ def start_exam(req: StartRequest, request: Request):
                 redis_bus.get_sync_client().set(
                     f"token:{token}", session.session_id, ex=86400
                 )
+                if cand_tok:
+                    redis_bus.update_invitation(cand_tok, {
+                        "status": "started",
+                        "session_id": session.session_id,
+                        "started_at": time.time(),
+                    })
             except Exception:
                 pass
 
@@ -854,14 +974,258 @@ def list_sessions():
     return {"sessions": history, "total": len(history)}
 
 
+# --- Admin Plane Endpoints ---
+
+@app.post("/api/admin/login")
+def admin_login(req: AdminLoginRequest, response: Response):
+    if req.password != ADMIN_PASSWORD:
+        raise HTTPException(status_code=401, detail="Invalid admin password")
+    token = secrets.token_urlsafe(32)
+    _admin_tokens.add(token)
+    redis_bus.store_admin_token(token, expires_in=86400 * 7)
+    response.set_cookie(
+        key="admin_token",
+        value=token,
+        httponly=True,
+        max_age=86400 * 7,
+        path="/",
+        samesite="lax",
+    )
+    return {"status": "ok", "token": token, "authenticated": True}
+
+
+@app.get("/api/admin/check")
+def admin_check(request: Request):
+    return {"authenticated": is_admin_authenticated(request)}
+
+
+@app.post("/api/admin/logout")
+def admin_logout(request: Request, response: Response):
+    cookie_token = request.cookies.get("admin_token")
+    if cookie_token:
+        _admin_tokens.discard(cookie_token)
+        redis_bus.revoke_admin_token(cookie_token)
+    auth_header = request.headers.get("authorization", "") or request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        t = auth_header[7:].strip()
+        _admin_tokens.discard(t)
+        redis_bus.revoke_admin_token(t)
+    response.delete_cookie(key="admin_token", path="/")
+    return {"status": "ok", "authenticated": False}
+
+
+@app.get("/api/admin/config")
+def admin_get_config(request: Request):
+    if not is_admin_authenticated(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    preset = redis_bus.get_default_preset()
+    return {"default_preset": preset}
+
+
+@app.post("/api/admin/config")
+def admin_set_config(req: AdminConfigRequest, request: Request):
+    if not is_admin_authenticated(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    redis_bus.set_default_preset(req.default_preset)
+    return {"status": "ok", "default_preset": req.default_preset}
+
+
+@app.post("/api/admin/sessions/create")
+def admin_create_session_invite(req: CreateSessionInviteRequest, request: Request):
+    if not is_admin_authenticated(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    preset = req.preset or redis_bus.get_default_preset()
+    token = secrets.token_urlsafe(16)
+    redis_bus.create_invitation(token, preset)
+    return {
+        "token": token,
+        "preset": preset,
+        "url": f"/?token={token}",
+    }
+
+
+@app.get("/api/admin/sessions")
+def admin_list_sessions(request: Request):
+    if not is_admin_authenticated(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    items = []
+    seen_tokens = set()
+    seen_sids = set()
+
+    # 1. Active session
+    active_s = deployer.load_active_session(loader)
+    if active_s and active_s.status == "active":
+        sid = active_s.session_id
+        seen_sids.add(sid)
+        if active_s.candidate_token:
+            seen_tokens.add(active_s.candidate_token)
+        rem = _calculate_time_remaining(active_s)
+        items.append({
+            "session_id": sid,
+            "candidate_token": active_s.candidate_token,
+            "name": active_s.name,
+            "status": "active",
+            "created_at": active_s.created_at,
+            "time_remaining_seconds": rem,
+            "container_running": is_container_running(sid),
+            "total_tasks": len(active_s.questions),
+            "current_index": active_s.current_index,
+            "type": "active",
+            "url": f"/?token={active_s.candidate_token}" if active_s.candidate_token else "/",
+        })
+
+    # 2. Invitations
+    invitations = redis_bus.list_invitations()
+    for inv in invitations:
+        token = inv.get("token")
+        status = inv.get("status", "pending")
+        if status == "pending" or (token not in seen_tokens and status != "started"):
+            seen_tokens.add(token)
+            created_ts = inv.get("created_at")
+            created_str = datetime.fromtimestamp(created_ts, tz=timezone.utc).isoformat() if created_ts else ""
+            items.append({
+                "session_id": None,
+                "candidate_token": token,
+                "name": inv.get("preset", "Default Preset"),
+                "status": status,
+                "created_at": created_str,
+                "time_remaining_seconds": None,
+                "container_running": False,
+                "total_tasks": None,
+                "current_index": None,
+                "type": "invite",
+                "url": f"/?token={token}",
+            })
+
+    # 3. History
+    history = redis_bus.list_session_history(limit=50)
+    for h in history:
+        sid = h.get("session_id")
+        if sid and sid not in seen_sids:
+            seen_sids.add(sid)
+            tok = h.get("candidate_token")
+            if tok:
+                seen_tokens.add(tok)
+            items.append({
+                "session_id": sid,
+                "candidate_token": tok,
+                "name": h.get("name", "Exam Session"),
+                "status": h.get("status", "completed"),
+                "created_at": h.get("created_at", ""),
+                "archived_at": h.get("archived_at"),
+                "time_remaining_seconds": 0,
+                "container_running": is_container_running(sid),
+                "total_tasks": h.get("total_tasks", 0),
+                "scorecard_summary": h.get("scorecard_summary"),
+                "type": "archived",
+                "url": f"/?token={tok}" if tok else None,
+            })
+
+    return {"sessions": items, "total": len(items)}
+
+
+@app.get("/api/admin/session/{session_id}")
+def admin_get_session_detail(session_id: str, request: Request):
+    if not is_admin_authenticated(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    state = redis_bus.get_session_state(session_id)
+    if not state:
+        current = deployer.load_active_session(loader)
+        if current and current.session_id == session_id:
+            state = current.to_dict()
+    if not state and redis_bus.is_available():
+        client = redis_bus.get_sync_client()
+        raw = client.get(f"history:{session_id}")
+        if raw:
+            try:
+                state = json.loads(raw)
+            except Exception:
+                pass
+
+    if not state:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    q_ids = state.get("question_ids", [])
+    questions = [loader.get(qid) for qid in q_ids if loader.get(qid) is not None]
+    cur_idx = state.get("current_index", 0)
+    current_q = questions[cur_idx] if 0 <= cur_idx < len(questions) else None
+
+    task_data = None
+    if current_q:
+        task_data = {
+            "task_num": cur_idx + 1,
+            "id": current_q.id,
+            "title": current_q.title,
+            "domain": current_q.domain.value if hasattr(current_q.domain, "value") else str(current_q.domain),
+            "difficulty": current_q.difficulty.value if hasattr(current_q.difficulty, "value") else str(current_q.difficulty),
+            "points": current_q.points,
+            "target_context": current_q.target_context,
+            "namespace": current_q.namespace or "default",
+            "description": current_q.description,
+            "is_flagged": current_q.id in state.get("flagged", []),
+            "score_data": state.get("scores", {}).get(current_q.id),
+        }
+
+    return {
+        "session_id": session_id,
+        "candidate_token": state.get("candidate_token"),
+        "name": state.get("name"),
+        "status": state.get("status", "active"),
+        "current_index": cur_idx,
+        "total_tasks": len(questions),
+        "time_limit_minutes": state.get("time_limit_minutes"),
+        "created_at": state.get("created_at"),
+        "current_task": task_data,
+        "container_running": is_container_running(session_id),
+        "questions": [
+            {
+                "task_num": i + 1,
+                "id": q.id,
+                "title": q.title,
+                "points": q.points,
+                "is_current": i == cur_idx,
+                "is_flagged": q.id in state.get("flagged", []),
+                "score_data": state.get("scores", {}).get(q.id),
+            }
+            for i, q in enumerate(questions)
+        ]
+    }
+
+
+@app.post("/api/admin/sessions/{identifier}/terminate")
+def admin_terminate_session(identifier: str, request: Request):
+    if not is_admin_authenticated(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    desktop_mgr.stop_desktop(identifier)
+    redis_bus.archive_session(identifier, status="terminated")
+
+    active_s = deployer.load_active_session(loader)
+    if active_s and active_s.session_id == identifier:
+        deployer.clear_session(cleanup_cluster=False)
+
+    redis_bus.delete_invitation(identifier)
+    return {"status": "ok", "message": f"Session or invite {identifier} terminated"}
+
+
 # --- Built-in WebSocket PTY Terminal ---
 
 @app.websocket("/ws/terminal")
-async def terminal_websocket(websocket: WebSocket):
+@app.websocket("/ws/terminal/{session_id}")
+async def terminal_websocket(websocket: WebSocket, session_id: Optional[str] = None):
     await websocket.accept()
 
-    session = deployer.load_active_session(loader)
-    sid = session.session_id if session else "default"
+    is_admin = is_admin_authenticated(websocket)
+    param_sid = session_id or websocket.query_params.get("session_id")
+    if is_admin and param_sid:
+        sid = param_sid
+        session = None
+    else:
+        session = deployer.load_active_session(loader)
+        sid = session.session_id if session else "default"
+
     if session:
         try:
             recorder.attach_or_resume(session.session_id, session.name)
@@ -885,10 +1249,9 @@ async def terminal_websocket(websocket: WebSocket):
 
     pid, master_fd = pty.fork()
     if pid == 0:
-        is_admin_mode = os.getenv("EXAM_ADMIN", "0").lower() in ("1", "true")
         container_name = f"cka-desktop-{sid}"
         use_container = False
-        if not is_admin_mode and desktop_mgr.is_docker_available():
+        if desktop_mgr.is_docker_available():
             try:
                 r = subprocess.run(
                     ["docker", "inspect", "-f", "{{.State.Running}}", container_name],
@@ -1049,7 +1412,7 @@ async def _proxy_vnc(websocket: WebSocket, session_id: Optional[str] = None):
     subprotocol = "binary" if "binary" in requested_proto else None
     await websocket.accept(subprotocol=subprotocol)
 
-    is_admin_mode = os.getenv("EXAM_ADMIN", "0").lower() in ("1", "true")
+    is_admin_mode = is_admin_authenticated(websocket)
 
     # Resolve active session
     active_sid = None
@@ -1432,6 +1795,15 @@ async def _session_expiry_enforcer():
                 ))
         except Exception as e:
             print(f"[ExpiryEnforcer] Error: {e}")
+
+
+# Admin dashboard route
+@app.get("/admin", response_class=HTMLResponse)
+def get_admin_page(request: Request):
+    admin_html = STATIC_DIR / "admin.html"
+    if admin_html.exists():
+        return HTMLResponse(content=admin_html.read_text(encoding="utf-8"))
+    raise HTTPException(status_code=404, detail="Admin page not found")
 
 
 # Mount noVNC static files if present

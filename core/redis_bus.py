@@ -412,6 +412,142 @@ class RedisBus:
         except Exception:
             return []
 
+    # --- Admin Auth, Config & Candidate Invitations ---
+
+    def get_default_preset(self) -> str:
+        """Retrieves global default preset name."""
+        if self.is_available():
+            try:
+                client = self.get_sync_client()
+                val = client.get("config:default_preset")
+                if val:
+                    return str(val)
+            except Exception:
+                pass
+        return "mock-01-acme"
+
+    def set_default_preset(self, preset: str) -> bool:
+        """Sets global default preset name in Redis."""
+        if not self.is_available():
+            return False
+        try:
+            client = self.get_sync_client()
+            client.set("config:default_preset", preset)
+            return True
+        except Exception:
+            return False
+
+    def store_admin_token(self, token: str, expires_in: int = 86400 * 7) -> bool:
+        """Stores admin session token in Redis."""
+        if not self.is_available():
+            return False
+        try:
+            client = self.get_sync_client()
+            client.set(f"admin:token:{token}", "1", ex=expires_in)
+            return True
+        except Exception:
+            return False
+
+    def verify_admin_token(self, token: str) -> bool:
+        """Checks if admin session token is valid."""
+        if not token or not self.is_available():
+            return False
+        try:
+            client = self.get_sync_client()
+            val = client.get(f"admin:token:{token}")
+            return bool(val)
+        except Exception:
+            return False
+
+    def revoke_admin_token(self, token: str) -> None:
+        """Invalidates admin session token."""
+        if not self.is_available():
+            return
+        try:
+            client = self.get_sync_client()
+            client.delete(f"admin:token:{token}")
+        except Exception:
+            pass
+
+    def create_invitation(self, token: str, preset: str) -> Dict[str, Any]:
+        """Creates a candidate invitation record in Redis."""
+        data = {
+            "token": token,
+            "preset": preset,
+            "created_at": time.time(),
+            "status": "pending",
+        }
+        if self.is_available():
+            try:
+                client = self.get_sync_client()
+                client.set(f"invitation:{token}", json.dumps(data), ex=86400 * 7)
+                client.sadd("candidate_invitations", token)
+            except Exception as e:
+                print(f"[RedisBus] Failed to create invitation: {e}")
+        return data
+
+    def get_invitation(self, token: str) -> Optional[Dict[str, Any]]:
+        """Retrieves invitation record for candidate token."""
+        if not token or not self.is_available():
+            return None
+        try:
+            client = self.get_sync_client()
+            raw = client.get(f"invitation:{token}")
+            if raw:
+                return json.loads(raw)
+        except Exception:
+            pass
+        return None
+
+    def update_invitation(self, token: str, updates: Dict[str, Any]) -> bool:
+        """Updates invitation record for candidate token."""
+        if not token or not self.is_available():
+            return False
+        try:
+            client = self.get_sync_client()
+            raw = client.get(f"invitation:{token}")
+            if raw:
+                data = json.loads(raw)
+                data.update(updates)
+                client.set(f"invitation:{token}", json.dumps(data), ex=86400 * 7)
+                return True
+        except Exception:
+            pass
+        return False
+
+    def list_invitations(self) -> list:
+        """Lists all invitations."""
+        if not self.is_available():
+            return []
+        try:
+            client = self.get_sync_client()
+            tokens = client.smembers("candidate_invitations")
+            res = []
+            for t in tokens:
+                token_str = t if isinstance(t, str) else t.decode()
+                raw = client.get(f"invitation:{token_str}")
+                if raw:
+                    try:
+                        res.append(json.loads(raw))
+                    except Exception:
+                        pass
+                else:
+                    client.srem("candidate_invitations", token_str)
+            return sorted(res, key=lambda x: x.get("created_at", 0), reverse=True)
+        except Exception:
+            return []
+
+    def delete_invitation(self, token: str) -> None:
+        """Deletes an invitation."""
+        if not self.is_available():
+            return
+        try:
+            client = self.get_sync_client()
+            client.delete(f"invitation:{token}")
+            client.srem("candidate_invitations", token)
+        except Exception:
+            pass
+
 
 # Global singleton instance
 bus = RedisBus()

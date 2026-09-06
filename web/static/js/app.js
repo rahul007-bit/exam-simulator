@@ -498,6 +498,23 @@ window.copyFromDesktopToHost = async function () {
     showClipboardSyncToast(`Copied from Desktop: "${snippet}"`, false);
 };
 
+let candidateUrlToken = new URLSearchParams(window.location.search).get('token') || '';
+
+window.copySessionId = function () {
+    const sid = (currentSession && currentSession.session_id) || '';
+    if (!sid) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(sid).then(() => {
+            const badge = document.getElementById('sessionIdBadge');
+            if (badge) {
+                const old = badge.innerText;
+                badge.innerText = 'Copied!';
+                setTimeout(() => { badge.innerText = old; }, 1500);
+            }
+        });
+    }
+};
+
 /* ==========================================================================
    API Client & Session State
    ========================================================================== */
@@ -521,6 +538,18 @@ async function loadSession() {
         // Always establish real-time session event WebSocket
         initSessionWebSocket(data.session_id || 'active');
 
+        // Update Session ID Badge in header
+        const sidBadge = document.getElementById('sessionIdBadge');
+        if (sidBadge) {
+            if (data.session_id) {
+                sidBadge.style.display = 'inline-flex';
+                sidBadge.innerText = `#${data.session_id}`;
+                sidBadge.title = `Session ID: ${data.session_id} (Click to copy)`;
+            } else {
+                sidBadge.style.display = 'none';
+            }
+        }
+
         if (data.active && data.current_task) {
             currentSession = data;
             updateUIWithSession(data);
@@ -532,14 +561,17 @@ async function loadSession() {
         } else {
             // Render clean candidate exam start screen with locked or selected preset
             currentSelectedPreset = data.locked_preset || currentSelectedPreset;
-            renderStartScreen(currentSelectedPreset, data.is_admin);
+            if (data.token) {
+                candidateUrlToken = data.token;
+            }
+            renderStartScreen(currentSelectedPreset, data.is_admin, data.invited, candidateUrlToken);
         }
     } catch (err) {
         console.error('Failed to load session:', err);
     }
 }
 
-function renderStartScreen(lockedPreset, isAdmin) {
+function renderStartScreen(lockedPreset, isAdmin, isInvited, candidateToken) {
     const preset = lockedPreset || currentSelectedPreset || {
         filename: 'mock-01-acme',
         name: 'Mock Exam 01 — ACME Corp Onboarding',
@@ -550,8 +582,10 @@ function renderStartScreen(lockedPreset, isAdmin) {
     };
     currentSelectedPreset = preset;
 
+    const displayTitle = isInvited ? `Assigned Exam: ${preset.name}` : preset.name;
+
     // Header updates
-    document.getElementById('examTitle').innerText = preset.name;
+    document.getElementById('examTitle').innerText = displayTitle;
     document.getElementById('btnOpenDrawer').style.display = 'none';
     const wsDropdown = document.getElementById('workspaceDropdown');
     if (wsDropdown) wsDropdown.style.display = 'inline-block';
@@ -584,16 +618,18 @@ function renderStartScreen(lockedPreset, isAdmin) {
     ` : '';
 
     const timeBadge = preset.time_limit_minutes ? `${preset.time_limit_minutes} minutes` : 'Untimed';
+    const invitedBadge = isInvited ? `<span class="hero-badge" style="background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.4); color: #38bdf8;">Assigned Invitation</span>` : '';
 
     document.getElementById('taskDescription').innerHTML = `
         <div class="exam-start-hero">
             <div class="hero-badge-row">
+                ${invitedBadge}
                 <span class="hero-badge badge-primary">${timeBadge}</span>
                 <span class="hero-badge badge-info">${preset.task_count} tasks</span>
                 <span class="hero-badge badge-success">Pass score: ${preset.pass_threshold_percent}%</span>
             </div>
 
-            <h1 class="hero-title">${preset.name}</h1>
+            <h1 class="hero-title">${displayTitle}</h1>
             <p class="hero-desc">${preset.description}</p>
 
             <div class="instructions-card">
@@ -609,7 +645,7 @@ function renderStartScreen(lockedPreset, isAdmin) {
             </div>
 
             <div class="hero-action-row">
-                <button class="btn-hero-start" onclick="startAssignedExam('${preset.filename}')">
+                <button class="btn-hero-start" onclick="startAssignedExam('${preset.filename}', '${candidateToken || ''}')">
                     START EXAM
                 </button>
             </div>
@@ -619,13 +655,18 @@ function renderStartScreen(lockedPreset, isAdmin) {
     `;
 }
 
-async function startAssignedExam(presetFilename) {
+async function startAssignedExam(presetFilename, tokenParam) {
     // Must be called synchronously on the user click gesture before any async fetch
     if (!isAdminUser) enterCandidateFullscreen();
+
+    const tok = tokenParam || candidateUrlToken || new URLSearchParams(window.location.search).get('token') || undefined;
 
     setLoadingState(true, 'Initializing exam', 'Preparing task 1 and configuring cluster environment...');
     try {
         const payload = (presetFilename === 'all') ? { all_questions: true } : { preset: presetFilename };
+        if (tok) {
+            payload.candidate_token = tok;
+        }
         const res = await fetch('/api/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -652,6 +693,14 @@ function updateUIWithSession(data) {
 
     // Header
     document.getElementById('examTitle').innerText = data.name || 'Kubernetes Exam Simulator';
+
+    // Session ID Badge
+    const sidBadge = document.getElementById('sessionIdBadge');
+    if (sidBadge && data.session_id) {
+        sidBadge.style.display = 'inline-flex';
+        sidBadge.innerText = `#${data.session_id}`;
+        sidBadge.title = `Session ID: ${data.session_id} (Click to copy)`;
+    }
 
     // Show header action buttons once exam is started
     const drawerBtn = document.getElementById('btnOpenDrawer');
