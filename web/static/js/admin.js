@@ -398,7 +398,7 @@ async function loadAdminSessions() {
         }
 
         let html = '';
-        items.forEach(item => {
+        items.forEach((item, idx) => {
             const sid = item.session_id || '';
             const tok = item.candidate_token || '';
             const status = (item.status || 'unknown').toLowerCase();
