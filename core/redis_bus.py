@@ -674,8 +674,11 @@ def get_system_resource_info() -> Dict[str, Any]:
     # Read config:max_concurrent_sessions from Redis (default: 1)
     max_concurrent_sessions = bus.get_max_concurrent_sessions()
 
-    # Recommended max: max(1, (available_ram_mb + current_containers * 600) // 700)
-    recommended_max = max(1, (available_mem_mb + running_containers * 600) // 700)
+    # Reserve 2500 MB for Kubernetes cluster (control plane + worker nodes) and host OS overhead
+    k8s_reserved_mb = 2500
+    usable_candidate_ram = max(0, available_mem_mb - k8s_reserved_mb)
+    # Each desktop container requires ~700 MB; cap safe recommendation between 1 and 4
+    recommended_max = max(1, min(4, (usable_candidate_ram + running_containers * 650) // 750))
 
     can_start = True
     reason = "Resources available"

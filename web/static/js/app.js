@@ -1025,8 +1025,12 @@ function showTerminalCopyToast(container) {
 }
 
 function connectTerminalWebSocket() {
+    if (termSocket && (termSocket.readyState === WebSocket.OPEN || termSocket.readyState === WebSocket.CONNECTING)) {
+        try { termSocket.close(); } catch (_) {}
+    }
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/terminal`;
+    const sidParam = currentSession && currentSession.session_id ? `/${encodeURIComponent(currentSession.session_id)}` : '';
+    const wsUrl = `${protocol}//${window.location.host}/ws/terminal${sidParam}`;
 
     termSocket = new WebSocket(wsUrl);
     termSocket.binaryType = 'arraybuffer';

@@ -1,4 +1,6 @@
 import os
+import sys
+import shutil
 import json
 import time
 import secrets
@@ -879,8 +881,29 @@ def log_client_event_endpoint(session_id: str, req: ClientEventRequest):
         return {"status": "error", "error": str(e)}
 
 
+def ensure_k3d_cluster_running(cluster_name: str = "cka") -> bool:
+    """Ensures the k3d cluster is active and running before starting an exam."""
+    if not shutil.which("k3d"):
+        return True
+    try:
+        r = subprocess.run(["k3d", "cluster", "list"], capture_output=True, text=True, timeout=5)
+        if r.returncode == 0 and cluster_name in r.stdout:
+            for line in r.stdout.splitlines():
+                if cluster_name in line:
+                    parts = line.split()
+                    if len(parts) >= 3 and parts[1].startswith("0/"):
+                        print(f"[ClusterAutoStart] k3d cluster '{cluster_name}' is stopped. Starting it now...", flush=True)
+                        subprocess.run(["k3d", "cluster", "start", cluster_name], capture_output=True, text=True, timeout=30)
+                        print(f"[ClusterAutoStart] k3d cluster '{cluster_name}' started successfully.", flush=True)
+                        return True
+    except Exception as e:
+        print(f"[ClusterAutoStart] Warning checking cluster: {e}", flush=True)
+    return True
+
+
 @app.post("/api/start")
 def start_exam(req: StartRequest, request: Request):
+    ensure_k3d_cluster_running("cka")
     cand_tok = req.candidate_token
     # If candidate token is provided, check if session already active for it
     if cand_tok:
@@ -1478,23 +1501,24 @@ async def terminal_websocket(websocket: WebSocket, session_id: Optional[str] = N
     is_admin = is_admin_authenticated(websocket)
     actor = "admin" if is_admin else "candidate"
     param_sid = session_id or websocket.query_params.get("session_id")
-    if is_admin and param_sid:
+    session = deployer.load_active_session(loader)
+    if param_sid:
         sid = param_sid
-        session = None
+    elif session:
+        sid = session.session_id
     else:
-        session = deployer.load_active_session(loader)
-        sid = session.session_id if session else "default"
+        sid = "default"
 
-    if session:
+    if session and session.session_id == sid:
         try:
             recorder.attach_or_resume(session.session_id, session.name)
             recorder.log_event("ADMIN_TERMINAL_ATTACH" if is_admin else "TERMINAL_ATTACH", {"session_id": session.session_id, "actor": actor}, actor=actor)
         except Exception:
             pass
-    elif is_admin and sid:
+    elif sid and sid != "default":
         try:
             recorder.attach_or_resume(sid)
-            recorder.log_event("ADMIN_TERMINAL_ATTACH", {"session_id": sid, "actor": "admin"}, actor="admin")
+            recorder.log_event("ADMIN_TERMINAL_ATTACH" if is_admin else "TERMINAL_ATTACH", {"session_id": sid, "actor": actor}, actor=actor)
         except Exception:
             pass
 
@@ -1517,17 +1541,23 @@ async def terminal_websocket(websocket: WebSocket, session_id: Optional[str] = N
         container_name = f"cka-desktop-{sid}"
         use_container = False
         if desktop_mgr.is_docker_available():
-            try:
-                r = subprocess.run(
-                    ["docker", "inspect", "-f", "{{.State.Running}}", container_name],
-                    capture_output=True,
-                    text=True,
-                    timeout=1,
-                )
-                if r.returncode == 0 and "true" in r.stdout.lower():
+            for _ in range(20):
+                if desktop_mgr.is_container_running(sid):
                     use_container = True
-            except Exception:
-                pass
+                    break
+                try:
+                    r = subprocess.run(
+                        ["docker", "inspect", "-f", "{{.State.Running}}", container_name],
+                        capture_output=True,
+                        text=True,
+                        timeout=2,
+                    )
+                    if r.returncode == 0 and "true" in r.stdout.lower():
+                        use_container = True
+                        break
+                except Exception:
+                    pass
+                time.sleep(0.5)
 
         if use_container:
             try:
@@ -1546,6 +1576,11 @@ async def terminal_websocket(websocket: WebSocket, session_id: Optional[str] = N
                 "bash", "-l",
             ]
             os.execvp("docker", docker_cmd)
+
+        if not is_admin:
+            sys.stderr.write(f"\r\n\x1b[31m[Error] Exam container '{container_name}' is not running or ready.\r\nPlease wait a moment and reload, or verify that your exam session is started.\x1b[0m\r\n")
+            sys.stderr.flush()
+            sys.exit(1)
 
         target_user = os.getenv("EXAM_USER", "exam")
         try:
