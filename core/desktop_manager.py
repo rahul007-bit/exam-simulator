@@ -216,5 +216,47 @@ class DesktopManager:
             pass
         return 0
 
+    def list_all_docker_containers(self) -> List[Dict[str, Any]]:
+        """Lists all docker containers with session mapping and status."""
+        if not self.is_docker_available():
+            return []
+        try:
+            res = subprocess.run(
+                ["docker", "ps", "-a", "--format", "{{json .}}"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            containers = []
+            if res.returncode == 0 and res.stdout.strip():
+                import json
+                for line in res.stdout.strip().splitlines():
+                    if not line.strip():
+                        continue
+                    try:
+                        c = json.loads(line)
+                        names = c.get("Names", "")
+                        sid = None
+                        if "cka-desktop-" in names:
+                            sid = names.replace("cka-desktop-", "")
+                        elif "k3d-cka-" in names:
+                            sid = names.replace("k3d-cka-", "").split("-")[0]
+
+                        containers.append({
+                            "name": names,
+                            "node": "mgmt (10.8.0.15)",
+                            "kind": "docker",
+                            "type": "container",
+                            "image": c.get("Image", "-"),
+                            "status": c.get("State", c.get("Status", "-")),
+                            "session_id": sid or "-",
+                            "created_at": c.get("CreatedAt", "-")
+                        })
+                    except Exception:
+                        pass
+            return containers
+        except Exception:
+            return []
+
 
 desktop_mgr = DesktopManager()

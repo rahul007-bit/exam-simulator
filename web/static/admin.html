@@ -801,6 +801,52 @@
             </div>
         </div>
 
+        <!-- Section 3.5: Cluster Infrastructure & Compute Fleet -->
+        <div class="admin-card" style="margin-top: 24px;">
+            <div class="admin-card-header">
+                <div>
+                    <div class="admin-card-title">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px; color: #a855f7;"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+                        Cluster Infrastructure & Fleet Nodes
+                    </div>
+                    <div class="admin-card-subtitle">Live status of physical hosts, ephemeral Kubeadm containers, and candidate desktops across the cluster.</div>
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <button class="btn btn-secondary btn-sm" onclick="loadAdminInfrastructure()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 13px; height: 13px;"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                        Refresh Fleet
+                    </button>
+                </div>
+            </div>
+
+            <!-- Host Topology Grid -->
+            <div id="fleetNodesGrid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 20px;">
+                <!-- Populated dynamically by admin.js -->
+            </div>
+
+            <div class="admin-table-container">
+                <table class="admin-table">
+                    <thead>
+                        <tr>
+                            <th>Instance / Name</th>
+                            <th>Host Node</th>
+                            <th>Kind</th>
+                            <th>Session ID</th>
+                            <th>IP Address</th>
+                            <th>Resource Caps</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="adminInfraTableBody">
+                        <tr>
+                            <td colspan="8" style="text-align: center; color: #64748b; padding: 20px;">Loading fleet instances...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
     </div>
 
     <!-- Section 4: Observe Mode Modal / View -->

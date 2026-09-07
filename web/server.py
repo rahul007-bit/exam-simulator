@@ -29,6 +29,7 @@ from core.models import ExamSession, Question, GradeResult
 from core.recorder import recorder
 from core.redis_bus import bus as redis_bus, get_system_resource_info
 from core.desktop_manager import desktop_mgr
+from core.incus_manager import incus_mgr
 from core.sandbox_orchestrator import orchestrator
 
 app = FastAPI(title="Kubernetes Exam Web Simulator", version="2.0.0")
@@ -1477,6 +1478,68 @@ def admin_end_session(identifier: str, request: Request):
         redis_bus.archive_session(identifier, status="submitted")
 
     return {"status": "ok", "message": f"Session {identifier} ended and evaluated", "scorecard": scorecard}
+
+
+@app.get("/api/admin/infrastructure")
+def admin_get_infrastructure(request: Request):
+    if not is_admin_authenticated(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    docker_containers = desktop_mgr.list_all_docker_containers()
+    incus_instances = incus_mgr.list_all_fleet_instances()
+
+    resources = []
+    for d in docker_containers:
+        resources.append(d)
+    for i in incus_instances:
+        resources.append(i)
+
+    nodes = [
+        {"name": "mgmt", "ip": "10.8.0.15", "role": "Management & Web", "status": "ONLINE"},
+        {"name": "node1", "ip": "192.168.50.169", "role": "Compute Node 1", "status": "ONLINE"},
+        {"name": "node2", "ip": "192.168.50.188", "role": "Compute Node 2", "status": "ONLINE"},
+        {"name": "node3", "ip": "192.168.50.170", "role": "Compute Node 3", "status": "ONLINE"},
+    ]
+
+    return {
+        "nodes": nodes,
+        "resources": resources,
+        "summary": {
+            "total_nodes": len(nodes),
+            "total_docker_containers": len(docker_containers),
+            "total_incus_instances": len(incus_instances),
+            "total_resources": len(resources)
+        }
+    }
+
+
+class TerminateResourceRequest(BaseModel):
+    kind: str  # "docker" or "incus"
+    node: str  # "mgmt", "node1", "node2", "node3", or "local"
+    name: str
+
+
+@app.post("/api/admin/infrastructure/terminate")
+def admin_terminate_resource(req: TerminateResourceRequest, request: Request):
+    if not is_admin_authenticated(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    if req.kind == "docker":
+        try:
+            subprocess.run(["docker", "rm", "-f", req.name], timeout=10, stdout=subprocess.DEVNULL)
+            return {"status": "ok", "message": f"Docker container {req.name} removed"}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    elif req.kind == "incus":
+        rem = None if req.node in ("mgmt", "local", "127.0.0.1") else req.node
+        success = incus_mgr.delete_node(req.name, remote_name=rem)
+        if success:
+            return {"status": "ok", "message": f"Incus instance {req.name} removed from {req.node}"}
+        else:
+            raise HTTPException(status_code=500, detail=f"Failed to delete {req.name} on {req.node}")
+    else:
+        raise HTTPException(status_code=400, detail="Invalid resource kind")
+
 
 
 # --- Built-in WebSocket PTY Terminal ---

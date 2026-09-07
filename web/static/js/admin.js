@@ -66,6 +66,7 @@ async function checkAuth() {
             await loadPresetsAndConfig();
             await loadSystemResources();
             await loadAdminSessions();
+            await loadAdminInfrastructure();
 
             if (!adminRefreshInterval) {
                 adminRefreshInterval = setInterval(() => {
@@ -73,6 +74,7 @@ async function checkAuth() {
                     if (!currentObserveSessionId) {
                         loadAdminSessions();
                         loadSystemResources();
+                        loadAdminInfrastructure();
                     }
                 }, 5000);
             }
@@ -590,6 +592,111 @@ async function terminateSessionPrompt(identifier) {
         alert(`Failed to terminate: ${err.message}`);
     }
 }
+
+async function loadAdminInfrastructure() {
+    const tbody = document.getElementById('adminInfraTableBody');
+    const nodesGrid = document.getElementById('fleetNodesGrid');
+    if (!tbody) return;
+
+    try {
+        const res = await fetch('/api/admin/infrastructure');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        // 1. Render Nodes Cards
+        if (nodesGrid && data.nodes) {
+            nodesGrid.innerHTML = data.nodes.map(n => `
+                <div style="background: #0b111a; border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 16px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <span style="font-weight: 700; font-size: 0.95rem; color: #f8fafc;">${escapeHtml(n.name)}</span>
+                        <span class="status-pill status-active" style="font-size: 0.65rem;">${escapeHtml(n.status)}</span>
+                    </div>
+                    <div style="font-size: 0.78rem; color: #94a3b8; font-family: var(--font-code);">${escapeHtml(n.ip)}</div>
+                    <div style="font-size: 0.72rem; color: #64748b; margin-top: 4px;">${escapeHtml(n.role)}</div>
+                </div>
+            `).join('');
+        }
+
+        // 2. Render Resources Table
+        if (!data.resources || data.resources.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="8" style="text-align: center; color: #64748b; padding: 24px;">
+                        No active containers or Incus instances running in the fleet.
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        tbody.innerHTML = data.resources.map(r => {
+            const isDocker = r.kind === 'docker';
+            const kindBadge = isDocker 
+                ? `<span style="background: #0284c7; color: #fff; padding: 2px 7px; border-radius: 4px; font-size: 0.7rem; font-weight: 700;">DOCKER</span>`
+                : `<span style="background: #9333ea; color: #fff; padding: 2px 7px; border-radius: 4px; font-size: 0.7rem; font-weight: 700;">INCUS</span>`;
+
+            const isRunning = (r.status || '').toLowerCase().includes('running') || (r.status || '').toLowerCase().includes('up');
+            const statusBadge = isRunning 
+                ? `<span class="status-pill status-active">${escapeHtml(r.status)}</span>`
+                : `<span class="status-pill" style="background: #334155; color: #cbd5e1;">${escapeHtml(r.status)}</span>`;
+
+            const sidBadge = r.session_id && r.session_id !== '-'
+                ? `<span class="code-cell" style="color: #38bdf8;">${escapeHtml(r.session_id.slice(0, 14))}...</span>`
+                : `<span style="color: #64748b;">-</span>`;
+
+            const limits = (r.cpu_limit && r.cpu_limit !== '-') 
+                ? `${r.cpu_limit} vCPU, ${r.mem_limit || '-'}`
+                : `<span style="color: #64748b;">Host Default</span>`;
+
+            return `
+                <tr>
+                    <td><strong>${escapeHtml(r.name)}</strong></td>
+                    <td style="font-family: var(--font-code); font-size: 0.82rem;">${escapeHtml(r.node)}</td>
+                    <td>${kindBadge}</td>
+                    <td>${sidBadge}</td>
+                    <td style="font-family: var(--font-code); font-size: 0.84rem;">${escapeHtml(r.ip || '-')}</td>
+                    <td style="font-size: 0.8rem; color: #cbd5e1;">${limits}</td>
+                    <td>${statusBadge}</td>
+                    <td>
+                        <button class="btn btn-terminate btn-sm" onclick="terminateResourcePrompt('${r.kind}', '${r.node}', '${r.name}')" title="Terminate container/instance">
+                            Terminate
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+    } catch (err) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="8" style="text-align: center; color: #ef4444; padding: 20px;">
+                    Error loading infrastructure: ${escapeHtml(err.message)}
+                </td>
+            </tr>
+        `;
+    }
+}
+
+async function terminateResourcePrompt(kind, node, name) {
+    if (!name) return;
+    if (!confirm(`Are you sure you want to forcibly terminate ${kind} instance '${name}' on node '${node}'?`)) {
+        return;
+    }
+    try {
+        const res = await fetch('/api/admin/infrastructure/terminate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kind, node, name })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Termination failed');
+        showToast(data.message || `Terminated ${name}`);
+        loadAdminInfrastructure();
+    } catch (err) {
+        alert('Failed to terminate: ' + err.message);
+    }
+}
+
 
 window.toggleTableRowMenu = function (e, menuId) {
     e.stopPropagation();

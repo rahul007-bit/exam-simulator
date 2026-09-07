@@ -1,4 +1,4 @@
-﻿"""
+"""
 Unified Sandbox Orchestrator
 Coordinates the full lifecycle of candidate exam environments:
 - Desktop Container (noVNC + xterm + browser)
@@ -8,6 +8,7 @@ All components are strictly resource-capped.
 """
 import os
 import time
+import subprocess
 from typing import Dict, Any, Optional
 from core.desktop_manager import desktop_mgr
 from core.k3d_manager import k3d_mgr
@@ -34,14 +35,19 @@ class SandboxOrchestrator:
 
         # 3. If Incus microVMs are enabled, spawn them
         enable_microvms = os.getenv("ENABLE_MICROVMS", "0").lower() in ("1", "true")
+        single_node = os.getenv("SINGLE_NODE", "0").lower() in ("1", "true")
         microvm_ips = {}
         if enable_microvms and incus_mgr.is_available():
-            for role in ["node1", "node2", "node3"]:
-                vm_name = f"{role}-{session_id}"
-                if incus_mgr.launch_node(vm_name):
-                    ip = incus_mgr.get_node_ip(vm_name)
-                    if ip:
-                        microvm_ips[role] = ip
+            microvm_ips = incus_mgr.provision_kubeadm_cluster(session_id, is_distributed=(not single_node))
+            if microvm_ips and desktop_mgr.is_container_running(session_id):
+                for role, ip in microvm_ips.items():
+                    try:
+                        subprocess.run(
+                            ["docker", "exec", f"cka-desktop-{session_id}", "bash", "-c", f"echo '{ip} {role}' >> /etc/hosts"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5
+                        )
+                    except Exception:
+                        pass
 
         return {
             "session_id": session_id,
@@ -53,9 +59,10 @@ class SandboxOrchestrator:
     def teardown_session(self, session_id: str) -> bool:
         """Tears down all containers and microVMs for a session, freeing 100% of RAM."""
         print(f"[Orchestrator] Tearing down session sandboxes: {session_id}", flush=True)
+        single_node = os.getenv("SINGLE_NODE", "0").lower() in ("1", "true")
         desktop_mgr.stop_desktop(session_id)
         k3d_mgr.delete_ephemeral_cluster(session_id)
-        incus_mgr.delete_session_cluster(session_id)
+        incus_mgr.delete_session_cluster(session_id, is_distributed=(not single_node))
         return True
 
 
