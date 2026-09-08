@@ -433,6 +433,29 @@ printf '[Service]\\nEnvironment=KUBELET_EXTRA_ARGS=--fail-swap-on=false\\n' > /e
 systemctl daemon-reload 2>/dev/null || true
 """
 
+        # CKA drills drive nodes over SSH (setup.sh / graders use NODE_1..3), and
+        # candidates `ssh nodeN` from the desktop. Ensure sshd + key auth in every node.
+        pub_key = ""
+        for cand in (Path("/root/.ssh/id_ed25519.pub"), Path("/root/.ssh/id_rsa.pub"),
+                     Path.home() / ".ssh" / "id_ed25519.pub", Path.home() / ".ssh" / "id_rsa.pub"):
+            try:
+                if cand.exists():
+                    pub_key = cand.read_text(encoding="utf-8").strip()
+                    break
+            except Exception:
+                pass
+        ssh_guard = ""
+        if pub_key:
+            ssh_guard = f"""
+apt-get install -y openssh-server >/dev/null 2>&1 || true
+mkdir -p /run/sshd /root/.ssh && chmod 700 /root/.ssh
+touch /root/.ssh/authorized_keys
+grep -qxF '{pub_key}' /root/.ssh/authorized_keys 2>/dev/null || echo '{pub_key}' >> /root/.ssh/authorized_keys
+chmod 600 /root/.ssh/authorized_keys
+systemctl enable ssh >/dev/null 2>&1 || true
+systemctl restart ssh >/dev/null 2>&1 || systemctl restart sshd >/dev/null 2>&1 || (/usr/sbin/sshd 2>/dev/null || true)
+"""
+
         # 1. Setup node1 control-plane
         setup_node1 = f"""
 ln -sf /dev/console /dev/kmsg
@@ -440,6 +463,7 @@ mount -o remount,rw /proc/sys 2>/dev/null || true
 echo 10 > /proc/sys/kernel/panic 2>/dev/null || true
 echo 1 > /proc/sys/vm/overcommit_memory 2>/dev/null || true
 {swap_guard}
+{ssh_guard}
 mkdir -p /etc/cni/net.d
 cat << 'EOF' > /etc/cni/net.d/10-local.conflist
 {cni_json}
@@ -498,6 +522,7 @@ mount -o remount,rw /proc/sys 2>/dev/null || true
 echo 10 > /proc/sys/kernel/panic 2>/dev/null || true
 echo 1 > /proc/sys/vm/overcommit_memory 2>/dev/null || true
 {swap_guard}
+{ssh_guard}
 mkdir -p /etc/cni/net.d
 cat << 'EOF' > /etc/cni/net.d/10-local.conflist
 {cni_json}

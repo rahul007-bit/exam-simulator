@@ -18,11 +18,33 @@ def incus_exec(script, timeout=3600, label="exec"):
         sys.exit(2)
     return r
 
+print("=== [0/5] launch fresh k8s-base ===", flush=True)
+run([B, "delete", "-f", "k8s-base"], 120, "cleanup-stale")
+BASE_IMG = "bff8d333cf0d"  # unaliased Debian bookworm source image on mgmt
+r = run([B, "launch", BASE_IMG, "k8s-base", "-c", "limits.cpu=2", "-c", "limits.memory=2GiB",
+         "-c", "limits.processes=1500", "-c", "security.nesting=true"], 180, "launch")
+if r.returncode != 0:
+    r = run([B, "launch", "images:debian/12", "k8s-base", "-c", "limits.cpu=2", "-c", "limits.memory=2GiB",
+             "-c", "limits.processes=1500", "-c", "security.nesting=true"], 600, "launch-from-images")
+if r.returncode != 0:
+    print("FATAL: could not launch k8s-base", flush=True)
+    sys.exit(2)
+for i in range(30):
+    rr = subprocess.run([B, "list", "k8s-base", "--format", "csv"], capture_output=True, text=True)
+    if rr.stdout.strip():
+        parts = rr.stdout.splitlines()[0].split(",")
+        if len(parts) > 3 and parts[3].strip():
+            print(f"k8s-base IP: {parts[3].strip().split()[0]}", flush=True)
+            break
+    time.sleep(1)
+time.sleep(3)
+
 print("=== [1/5] apt packages ===", flush=True)
-incus_exec("export DEBIAN_FRONTEND=noninteractive; apt-get update -y && apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release containerd bash-completion vim git jq net-tools iproute2 ethtool", 1800, "apt-base")
+incus_exec("export DEBIAN_FRONTEND=noninteractive; apt-get update -y && apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release containerd openssh-server bash-completion vim git jq net-tools iproute2 ethtool", 1800, "apt-base")
 
 print("=== [2/5] containerd + k8s repo ===", flush=True)
 incus_exec("mkdir -p /etc/containerd && containerd config default | sed 's/SystemdCgroup = false/SystemdCgroup = true/' > /etc/containerd/config.toml && systemctl restart containerd && systemctl enable containerd", 300, "containerd")
+incus_exec("mkdir -p /run/sshd && systemctl enable ssh && systemctl restart ssh", 120, "sshd")
 incus_exec("mkdir -p -m 755 /etc/apt/keyrings && curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg && echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /' > /etc/apt/sources.list.d/kubernetes.list && apt-get update -y", 600, "k8s-repo")
 incus_exec("export DEBIAN_FRONTEND=noninteractive; apt-get install -y kubelet kubeadm kubectl && apt-mark hold kubelet kubeadm kubectl && systemctl enable kubelet", 900, "k8s-packages")
 
