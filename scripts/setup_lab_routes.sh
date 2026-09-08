@@ -12,7 +12,15 @@
 # address 10.8.0.15 is NOT reachable from the RHEL segment). Docker's FORWARD
 # policy (DROP) on the mgmt host would otherwise swallow LAN -> CP traffic.
 #
-# Routes/firewall rules are runtime-only; re-run this script after a reboot.
+# Routes/firewall rules are runtime-only; this script is installed as a
+# systemd template unit (scripts/lab-routes@.service) on every host so they
+# are re-applied automatically at boot:
+#   systemctl enable --now lab-routes@mgmt.service   # on the mgmt host
+#   systemctl enable --now lab-routes@node1.service  # on 192.168.50.169
+#   (likewise lab-routes@node2 / lab-routes@node3)
+# Docker resets the FORWARD policy when it starts, so the unit is ordered
+# After=docker.service; kubelet swap tolerance is handled inside the engine's
+# bootstrap (swapoff + fail-swap-on=false drop-in), no extra unit needed.
 set -euo pipefail
 
 MGM_LAN="192.168.50.122"

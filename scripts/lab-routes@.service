@@ -1,0 +1,14 @@
+[Unit]
+Description=Lab kubeadm routing + firewall (%i)
+Wants=network-online.target
+After=network-online.target docker.service incus.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/setup-lab-routes.sh %i
+RemainAfterExit=yes
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
