@@ -202,6 +202,37 @@ def is_container_running(sid: Optional[str]) -> bool:
     return container_name in running_set
 
 
+def _is_docker_container_active(cname: str) -> bool:
+    """Direct live inspect to confirm container is running without caching delay."""
+    try:
+        r = subprocess.run(
+            ["docker", "inspect", "-f", "{{.State.Running}}", cname],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        return r.returncode == 0 and "true" in r.stdout.lower()
+    except Exception:
+        return False
+
+
+def _find_running_desktop_containers() -> List[str]:
+    """Finds all running cka-desktop-* container names."""
+    try:
+        r = subprocess.run(
+            ["docker", "ps", "--filter", "name=cka-desktop-", "--format", "{{.Names}}"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            return [line.strip() for line in r.stdout.strip().splitlines() if line.strip()]
+    except Exception:
+        pass
+    return []
+
+
+
 
 # Idle timeout: auto-kill container + session after this many minutes of inactivity
 IDLE_TIMEOUT_MINUTES: int = int(os.getenv("EXAM_IDLE_TIMEOUT_MINUTES", "30"))
@@ -222,7 +253,7 @@ _selected_preset_override: Optional[str] = None
 def _get_locked_preset_info(override_preset: Optional[str] = None) -> Dict[str, Any]:
     global _selected_preset_override
     default_cfg = redis_bus.get_default_preset() if redis_bus.is_available() else "mock-01-acme"
-    preset_key = override_preset or _selected_preset_override or os.getenv("EXAM_PRESET") or default_cfg
+    preset_key = override_preset or _selected_preset_override or default_cfg or os.getenv("EXAM_PRESET") or "mock-01-acme"
     if preset_key == "all":
         return {
             "filename": "all",
@@ -327,8 +358,9 @@ def get_session(request: Request):
 
     preset_info = _get_locked_preset_info(url_preset)
 
-    if not session:
+    if not session or getattr(session, "status", "active") != "active":
         return {
+
             "active": False,
             "session": None,
             "locked_preset": preset_info,
@@ -336,8 +368,10 @@ def get_session(request: Request):
         }
 
     # Auto-Restore Container for Active Sessions
+    # Only when the session is genuinely registered as active (not a stale
+    # state snapshot from a submitted/terminated session).
     if session and session.session_id and session.status == "active":
-        if not is_container_running(session.session_id):
+        if redis_bus.is_session_active(session.session_id) and not is_container_running(session.session_id):
             res_info = get_system_resource_info()
             if res_info.get("available_mem_mb", 0) >= 350:
                 print(f"[AutoRestore] Container for active session {session.session_id} was not running. Automatically restored.", flush=True)
@@ -472,7 +506,8 @@ def get_presets():
         if "task_count" not in p:
             p["task_count"] = len(p.get("questions", []))
     default_cfg = redis_bus.get_default_preset() if redis_bus.is_available() else "mock-01-acme"
-    selected = _selected_preset_override or os.getenv("EXAM_PRESET") or default_cfg
+    selected = _selected_preset_override or default_cfg or os.getenv("EXAM_PRESET") or "mock-01-acme"
+
     return {"presets": presets, "selected": selected}
 
 
@@ -790,8 +825,9 @@ def action_submit():
 
     try:
         if session and session.session_id:
-            desktop_mgr.stop_desktop(session.session_id)
+            orchestrator.teardown_session(session.session_id)
             redis_bus.archive_session(
+
                 session.session_id,
                 status="completed",
                 scorecard={
@@ -801,8 +837,11 @@ def action_submit():
                     "passed": passed,
                 },
             )
+            deployer.clear_active_session()
     except Exception:
         pass
+
+
 
     return report_data
 
@@ -986,8 +1025,13 @@ def start_exam(req: StartRequest, request: Request):
         _candidate_token_map[token] = session.session_id
         if redis_bus.is_available():
             try:
+                redis_bus.set_session_state(session.session_id, session.to_dict())
+                redis_bus.register_active_session(session.session_id, session.to_dict())
                 redis_bus.get_sync_client().set(
                     f"token:{token}", session.session_id, ex=86400
+                )
+                redis_bus.get_sync_client().set(
+                    "session:active:id", session.session_id, ex=86400
                 )
                 if cand_tok:
                     redis_bus.update_invitation(cand_tok, {
@@ -999,7 +1043,13 @@ def start_exam(req: StartRequest, request: Request):
                 pass
 
         redis_bus.touch_session_activity(session.session_id)
-        desktop_mgr.start_desktop(session.session_id)
+        orchestrator.provision_session(session.session_id)
+
+        # Deploy Task 1 now that k3d-cka cluster exists and host ~/.kube/config is populated!
+        try:
+            deployer.deploy_step(session, 0, force_setup=True)
+        except Exception as ex:
+            print(f"[StartExam] Warning deploying initial Task 1: {ex}")
 
     return get_session(request)
 
@@ -1116,13 +1166,18 @@ def reset_exam(request: Request):
             recorder.log_event("EXAM_RESET", {"actor": actor}, actor=actor)
         except Exception:
             pass
-        desktop_mgr.stop_desktop(active_session.session_id)
+        orchestrator.teardown_session(active_session.session_id)
         try:
             redis_bus.archive_session(active_session.session_id, status="reset")
         except Exception:
             pass
     deployer.clear_session(cleanup_cluster=True)
     return {"status": "ok", "message": "Exam session cleared and cluster cleaned"}
+
+
+@app.post("/api/end")
+def end_exam(request: Request):
+    return reset_exam(request)
 
 
 @app.get("/api/sessions")
@@ -1197,10 +1252,13 @@ def admin_get_config(request: Request):
 
 @app.post("/api/admin/config")
 def admin_set_config(req: AdminConfigRequest, request: Request):
+    global _selected_preset_override
     if not is_admin_authenticated(request):
         raise HTTPException(status_code=401, detail="Unauthorized")
     redis_bus.set_default_preset(req.default_preset)
+    _selected_preset_override = None
     return {"status": "ok", "default_preset": req.default_preset}
+
 
 
 class SetResourceLimitRequest(BaseModel):
@@ -1417,24 +1475,41 @@ def admin_terminate_session(identifier: str, request: Request):
     except Exception:
         pass
 
-    desktop_mgr.stop_desktop(identifier)
-    redis_bus.archive_session(identifier, status="terminated")
+    # Resolve session_id if identifier is a candidate token
+    actual_session_id = identifier
+    if redis_bus.is_available():
+        try:
+            client = redis_bus.get_sync_client()
+            tok_sid = client.get(f"token:{identifier}")
+            if tok_sid:
+                actual_session_id = tok_sid
+        except Exception:
+            pass
+
+    orchestrator.teardown_session(actual_session_id)
+    if actual_session_id != identifier:
+        orchestrator.teardown_session(identifier)
+
+    redis_bus.archive_session(actual_session_id, status="terminated")
 
     active_s = deployer.load_active_session(loader)
-    if active_s and active_s.session_id == identifier:
-        deployer.clear_session(cleanup_cluster=False)
+    if active_s and (active_s.session_id == actual_session_id or active_s.session_id == identifier):
+        deployer.clear_session(cleanup_cluster=True)
 
     redis_bus.delete_invitation(identifier)
     if redis_bus.is_available():
         try:
             client = redis_bus.get_sync_client()
             client.delete(f"history:{identifier}")
+            client.delete(f"history:{actual_session_id}")
             client.delete(f"token:{identifier}")
             client.delete(f"session:{identifier}")
+            client.delete(f"session:{actual_session_id}")
             client.delete(f"session:{identifier}:state")
+            client.delete(f"session:{actual_session_id}:state")
         except Exception:
             pass
-    return {"status": "ok", "message": f"Session or invite {identifier} deleted/terminated"}
+    return {"status": "ok", "message": f"Session or invite {identifier} deleted/terminated and all resources freed"}
 
 
 @app.post("/api/admin/sessions/{identifier}/reset")
@@ -1448,11 +1523,24 @@ def admin_reset_session(identifier: str, request: Request):
     except Exception:
         pass
 
-    desktop_mgr.stop_desktop(identifier)
-    redis_bus.archive_session(identifier, status="reset")
+    actual_session_id = identifier
+    if redis_bus.is_available():
+        try:
+            client = redis_bus.get_sync_client()
+            tok_sid = client.get(f"token:{identifier}")
+            if tok_sid:
+                actual_session_id = tok_sid
+        except Exception:
+            pass
+
+    orchestrator.teardown_session(actual_session_id)
+    if actual_session_id != identifier:
+        orchestrator.teardown_session(identifier)
+
+    redis_bus.archive_session(actual_session_id, status="reset")
 
     active_s = deployer.load_active_session(loader)
-    if active_s and active_s.session_id == identifier:
+    if active_s and (active_s.session_id == actual_session_id or active_s.session_id == identifier):
         deployer.clear_session(cleanup_cluster=True)
 
     return {"status": "ok", "message": f"Session {identifier} reset and cluster cleaned"}
@@ -1474,8 +1562,11 @@ def admin_end_session(identifier: str, request: Request):
     if active_s and active_s.session_id == identifier:
         scorecard = action_submit()
     else:
-        desktop_mgr.stop_desktop(identifier)
+        orchestrator.teardown_session(identifier)
         redis_bus.archive_session(identifier, status="submitted")
+        deployer.clear_active_session()
+
+
 
     return {"status": "ok", "message": f"Session {identifier} ended and evaluated", "scorecard": scorecard}
 
@@ -1552,26 +1643,77 @@ async def terminal_websocket(websocket: WebSocket, session_id: Optional[str] = N
     is_admin = is_admin_authenticated(websocket)
     actor = "admin" if is_admin else "candidate"
     param_sid = session_id or websocket.query_params.get("session_id")
-    session = deployer.load_active_session(loader)
-    if param_sid:
-        sid = param_sid
-    elif session:
-        sid = session.session_id
-    else:
-        sid = "default"
+    
+    # Resolve target container & session ID cleanly (never fall back to host shell)
+    target_container: Optional[str] = None
+    sid: Optional[str] = None
 
-    if session and session.session_id == sid:
+    # Wait up to 12 seconds for container if it is currently starting up
+    for attempt in range(24):
+        # 1. Specified param_sid
+        if param_sid and param_sid not in ("default", "active"):
+            cname = f"cka-desktop-{param_sid}"
+            if _is_docker_container_active(cname):
+                target_container = cname
+                sid = param_sid
+                break
+
+        # 2. Deployer active session from file or Redis
+        session = deployer.load_active_session(loader)
+        if session and session.session_id:
+            cname = f"cka-desktop-{session.session_id}"
+            if _is_docker_container_active(cname):
+                target_container = cname
+                sid = session.session_id
+                break
+
+        # 3. Redis active session ID
+        active_sid = redis_bus.get_active_session_id()
+        if active_sid:
+            cname = f"cka-desktop-{active_sid}"
+            if _is_docker_container_active(cname):
+                target_container = cname
+                sid = active_sid
+                break
+
+        # 4. Any running cka-desktop-* container
+        running = _find_running_desktop_containers()
+        if running:
+            target_container = running[0]
+            sid = target_container.replace("cka-desktop-", "")
+            break
+
+        # If not ready on first try, show waiting banner to terminal
+        if attempt == 0:
+            try:
+                await websocket.send_bytes(
+                    b"\r\n\x1b[33m[Simulator] Waiting for exam container to become ready...\x1b[0m\r\n"
+                )
+            except Exception:
+                pass
+
+        await asyncio.sleep(0.5)
+
+    if not target_container or not sid:
         try:
-            recorder.attach_or_resume(session.session_id, session.name)
-            recorder.log_event("ADMIN_TERMINAL_ATTACH" if is_admin else "TERMINAL_ATTACH", {"session_id": session.session_id, "actor": actor}, actor=actor)
+            await websocket.send_bytes(
+                b"\r\n\x1b[31m[Error] Exam container is not running or ready.\r\nPlease start an exam session from the dashboard or wait for the environment to finish loading.\x1b[0m\r\n"
+            )
+            await asyncio.sleep(1)
+            await websocket.close(code=1008)
         except Exception:
             pass
-    elif sid and sid != "default":
-        try:
-            recorder.attach_or_resume(sid)
-            recorder.log_event("ADMIN_TERMINAL_ATTACH" if is_admin else "TERMINAL_ATTACH", {"session_id": sid, "actor": actor}, actor=actor)
-        except Exception:
-            pass
+        return
+
+    try:
+        recorder.attach_or_resume(sid)
+        recorder.log_event(
+            "ADMIN_TERMINAL_ATTACH" if is_admin else "TERMINAL_ATTACH",
+            {"session_id": sid, "container": target_container, "actor": actor},
+            actor=actor,
+        )
+    except Exception:
+        pass
 
     # Instant scrollback replay from Redis buffer upon connect/reconnect
     try:
@@ -1589,91 +1731,27 @@ async def terminal_websocket(websocket: WebSocket, session_id: Optional[str] = N
 
     pid, master_fd = pty.fork()
     if pid == 0:
-        container_name = f"cka-desktop-{sid}"
-        use_container = False
-        if desktop_mgr.is_docker_available():
-            for _ in range(20):
-                if desktop_mgr.is_container_running(sid):
-                    use_container = True
-                    break
-                try:
-                    r = subprocess.run(
-                        ["docker", "inspect", "-f", "{{.State.Running}}", container_name],
-                        capture_output=True,
-                        text=True,
-                        timeout=2,
-                    )
-                    if r.returncode == 0 and "true" in r.stdout.lower():
-                        use_container = True
-                        break
-                except Exception:
-                    pass
-                time.sleep(0.5)
-
-        if use_container:
-            try:
-                os.setpgid(0, 0)
-                termios.tcsetpgrp(0, os.getpgrp())
-            except Exception:
-                pass
-            docker_cmd = [
-                "docker", "exec", "-it",
-                "-u", "exam",
-                "-e", "TERM=xterm-256color",
-                "-e", "COLORTERM=truecolor",
-                "-e", "EXAM_RECORDED=1",
-                "-e", "WEB_TERMINAL=1",
-                container_name,
-                "bash", "-l",
-            ]
-            os.execvp("docker", docker_cmd)
-
-        if not is_admin:
-            sys.stderr.write(f"\r\n\x1b[31m[Error] Exam container '{container_name}' is not running or ready.\r\nPlease wait a moment and reload, or verify that your exam session is started.\x1b[0m\r\n")
-            sys.stderr.flush()
-            sys.exit(1)
-
-        target_user = os.getenv("EXAM_USER", "exam")
-        try:
-            import pwd
-            user_entry = pwd.getpwnam(target_user)
-            uid = user_entry.pw_uid
-            gid = user_entry.pw_gid
-            home_dir = user_entry.pw_dir
-            shell = user_entry.pw_shell or "/bin/bash"
-
-            env["USER"] = target_user
-            env["LOGNAME"] = target_user
-            env["HOME"] = home_dir
-            env["SHELL"] = shell
-
-            try:
-                os.fchown(0, uid, gid)
-            except Exception:
-                pass
-
-            try:
-                os.chdir(home_dir)
-            except Exception:
-                pass
-
-            os.initgroups(target_user, gid)
-            os.setgid(gid)
-            os.setuid(uid)
-        except KeyError:
-            shell = os.environ.get("SHELL", "/bin/bash")
-            try:
-                os.chdir(str(Path.home()))
-            except Exception:
-                pass
-
         try:
             os.setpgid(0, 0)
             termios.tcsetpgrp(0, os.getpgrp())
         except Exception:
             pass
-
-        os.execvpe(shell, [shell, "-i"], env)
+        docker_cmd = [
+            "docker", "exec", "-it",
+            "-u", "exam",
+            "-e", "TERM=xterm-256color",
+            "-e", "COLORTERM=truecolor",
+            "-e", "EXAM_RECORDED=1",
+            "-e", "WEB_TERMINAL=1",
+            target_container,
+            "bash", "-l",
+        ]
+        try:
+            os.execvp("docker", docker_cmd)
+        except Exception as e:
+            sys.stderr.write(f"\r\n\x1b[31m[Error] Failed to exec container '{target_container}': {e}\x1b[0m\r\n")
+            sys.stderr.flush()
+            sys.exit(1)
     else:
         flags = fcntl.fcntl(master_fd, fcntl.F_GETFL)
         fcntl.fcntl(master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
@@ -1742,6 +1820,9 @@ async def terminal_websocket(websocket: WebSocket, session_id: Optional[str] = N
         )
         for task in pending:
             task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
 
         try:
             recorder.log_event("ADMIN_TERMINAL_DETACH" if is_admin else "TERMINAL_DETACH", {"session_id": sid, "actor": actor}, actor=actor)
@@ -1777,8 +1858,17 @@ async def _proxy_vnc(websocket: WebSocket, session_id: Optional[str] = None):
         pass
 
     sid = session_id
-    if not sid or sid == "active":
-        sid = active_sid
+    if not sid or sid in ("active", "default"):
+        if active_sid:
+            sid = active_sid
+        else:
+            s = deployer.load_active_session(loader)
+            if s and s.session_id:
+                sid = s.session_id
+            else:
+                running = _find_running_desktop_containers()
+                if running:
+                    sid = running[0].replace("cka-desktop-", "")
 
     # Security check: candidates can ONLY access their own active session
     if not is_admin_mode:
@@ -1791,35 +1881,48 @@ async def _proxy_vnc(websocket: WebSocket, session_id: Optional[str] = None):
     target_port = 5901
 
     if sid:
-        # Auto-Restore Container for Active Sessions:
-        if not is_container_running(sid):
+        # Auto-Restore Container for Active Sessions (only when the session is
+        # genuinely registered as active — never resurrect terminated ones).
+        if redis_bus.is_session_active(sid) and not is_container_running(sid):
             res_info = get_system_resource_info()
             if res_info.get("available_mem_mb", 0) >= 350:
                 print(f"[AutoRestore] Container for active session {sid} was not running. Automatically restored.", flush=True)
                 desktop_mgr.start_desktop(sid)
 
-        # Check Redis registration, wait up to 8s if container is currently registering
-        for _ in range(16):
+        # Check Redis registration, wait up to 10s if container is currently registering
+        for _ in range(20):
             desktop_info = redis_bus.get_desktop_info(sid)
             if desktop_info and "host" in desktop_info:
                 h = desktop_info["host"]
-                # Candidates must never connect to host loopback
-                if not is_admin_mode and (h == "127.0.0.1" or h == "localhost"):
-                    pass
-                else:
+                # Reject 127.0.0.1 / localhost (container desktop only)
+                if h not in ("127.0.0.1", "localhost"):
                     target_host = h
                     target_port = int(desktop_info.get("vnc_port", 5901))
                     break
+
+            # Try docker inspect directly for the container IP if not in Redis yet
+            try:
+                ip_r = subprocess.run(
+                    ["docker", "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", f"cka-desktop-{sid}"],
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                )
+                cip = ip_r.stdout.strip()
+                if cip:
+                    target_host = cip
+                    target_port = 5901
+                    redis_bus.set_desktop_info(sid, host=cip, vnc_port=5901, ws_port=6080)
+                    break
+            except Exception:
+                pass
             await asyncio.sleep(0.5)
 
-    if not target_host:
-        if is_admin_mode:
-            target_host = "127.0.0.1"
-            target_port = 5901
-        else:
-            print(f"[VNC Proxy] Connection rejected: Container desktop for session {sid} is unavailable (host fallback is disabled for candidates)", flush=True)
-            await websocket.close(code=1008)
-            return
+    if not target_host or target_host in ("127.0.0.1", "localhost"):
+        print(f"[VNC Proxy] Session {sid} has no running desktop container. Refusing VNC connection.", flush=True)
+        await websocket.close(code=1008)
+        return
+
 
     try:
         reader, writer = await asyncio.open_connection(target_host, target_port)
@@ -1873,6 +1976,9 @@ async def _proxy_vnc(websocket: WebSocket, session_id: Optional[str] = None):
     )
     for task in pending:
         task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
 
     try:
         writer.close()
@@ -2007,6 +2113,9 @@ async def session_events_websocket(websocket: WebSocket, session_id: str):
         done, pending = await asyncio.wait([t1, t2], return_when=asyncio.FIRST_COMPLETED)
         for t in pending:
             t.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
     finally:
         try:
             await pubsub.unsubscribe(channel)
@@ -2144,9 +2253,9 @@ async def _idle_session_reaper():
                 await asyncio.sleep(2)  # Give WS clients time to receive the event
                 loop = asyncio.get_running_loop()
                 await loop.run_in_executor(None, lambda: (
-                    desktop_mgr.stop_desktop(session.session_id),
+                    orchestrator.teardown_session(session.session_id),
                     redis_bus.archive_session(session.session_id, status="idle_timeout"),
-                    deployer.clear_session(cleanup_cluster=False),
+                    deployer.clear_session(cleanup_cluster=True),
                 ))
         except Exception as e:
             print(f"[SessionReaper] Error: {e}")
@@ -2180,9 +2289,9 @@ async def _session_expiry_enforcer():
                 # Archive as expired (not graded since we don't have full grading context async)
                 loop = asyncio.get_running_loop()
                 await loop.run_in_executor(None, lambda: (
-                    desktop_mgr.stop_desktop(session.session_id),
+                    orchestrator.teardown_session(session.session_id),
                     redis_bus.archive_session(session.session_id, status="expired"),
-                    deployer.clear_session(cleanup_cluster=False),
+                    deployer.clear_session(cleanup_cluster=True),
                 ))
         except Exception as e:
             print(f"[ExpiryEnforcer] Error: {e}")

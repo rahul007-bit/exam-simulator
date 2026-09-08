@@ -189,9 +189,34 @@ class RedisBus:
         try:
             client = self.get_sync_client()
             client.srem("active_sessions", session_id)
+            active_id = client.get("session:active:id")
+            if isinstance(active_id, bytes):
+                active_id = active_id.decode()
+            if active_id == session_id:
+                client.delete("session:active:id")
             self.publish_session_event(session_id, {"type": "session_terminated", "session_id": session_id})
         except Exception:
             pass
+
+    def is_session_active(self, session_id: str) -> bool:
+        """True only when the session is the genuinely registered active one.
+
+        Guards auto-restore paths against stale state snapshots: after
+        submit/terminate the session must be considered dead even if an old
+        state blob (status "active") is still cached in Redis.
+        """
+        if not self.is_available() or not session_id:
+            return False
+        try:
+            client = self.get_sync_client()
+            if not client.sismember("active_sessions", session_id):
+                return False
+            active_id = client.get("session:active:id")
+            if isinstance(active_id, bytes):
+                active_id = active_id.decode()
+            return active_id == session_id
+        except Exception:
+            return False
 
     # --- Terminal Output Buffer (Scrollback Replay on Reconnect) ---
 
@@ -250,12 +275,28 @@ class RedisBus:
         try:
             client = self.get_sync_client()
             sid = session_id or client.get("session:active:id")
+            if isinstance(sid, bytes):
+                sid = sid.decode()
             if not sid:
                 return None
             raw = client.get(f"session:{sid}")
+
             if raw:
                 return json.loads(raw)
             return None
+        except Exception:
+            return None
+
+    def get_active_session_id(self) -> Optional[str]:
+        """Returns the current active session ID from Redis if set."""
+        if not self.is_available():
+            return None
+        try:
+            client = self.get_sync_client()
+            sid = client.get("session:active:id")
+            if isinstance(sid, bytes):
+                return sid.decode()
+            return sid
         except Exception:
             return None
 
@@ -366,8 +407,11 @@ class RedisBus:
             client.delete(f"terminal:buffer:{session_id}")
             # Remove from active id pointer if it matches
             active_id = client.get("session:active:id")
-            if active_id == session_id:
+            if isinstance(active_id, bytes):
+                active_id = active_id.decode()
+            if active_id == session_id or not active_id:
                 client.delete("session:active:id")
+
         except Exception as e:
             print(f"[RedisBus] archive_session error: {e}")
 

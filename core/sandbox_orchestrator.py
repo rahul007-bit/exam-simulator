@@ -156,6 +156,14 @@ class SandboxOrchestrator:
         try:
             from core.redis_bus import bus as redis_bus
             if redis_bus.is_available():
+                # Deregister BEFORE key cleanup so auto-restore paths immediately
+                # treat this session as dead (prevents desktop resurrection).
+                try:
+                    redis_bus.deregister_session(session_id)
+                    if clean_id:
+                        redis_bus.deregister_session(clean_id)
+                except Exception:
+                    pass
                 client = redis_bus.get_sync_client()
                 if client:
                     for key in [
