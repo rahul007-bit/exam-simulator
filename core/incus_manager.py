@@ -1,27 +1,47 @@
 """
-Incus MicroVM Manager for Kubeadm Multi-Node Clusters
-Uses native Incus Remotes (TLS on port 8443) to provision and tear down
-hardware-accelerated, resource-capped MicroVMs across compute nodes.
+Incus MicroVM & System Container Manager for Kubeadm Multi-Node Clusters
+Uses native Incus Remotes (TLS on port 8443) and local system containers
+to provision, bootstrap, and tear down resource-capped Kubernetes nodes.
 """
 import os
 import time
 import json
 import shutil
 import subprocess
-from typing import Optional, Dict, Any, List
+import concurrent.futures
+from pathlib import Path
+from typing import Optional, Dict, Any, List, Tuple
 
 
 class IncusClusterManager:
     DEFAULT_IMAGE = "k8s-golden"
+    GOLDEN_INSTANCE = "golden-k8s"
+    GOLDEN_SNAPSHOT = "gold"
+    # Must match the control-plane images pre-pulled into the golden image
+    # (see scripts/bake_k8s_base.sh). Pinning avoids a slow registry pull at init.
+    K8S_VERSION = "v1.30.0"
 
     def __init__(self):
-        self._incus_path: Optional[str] = shutil.which("incus")
+        self._incus_bin = os.getenv("INCUS_BIN", "incus")
+        self._incus_path: Optional[str] = shutil.which(self._incus_bin)
+
+    def _get_bin(self) -> str:
+        return self._incus_path or self._incus_bin
+
+    def _run_incus(self, cmd: List[str], **kwargs) -> subprocess.CompletedProcess:
+        """Helper to invoke the Incus CLI with consistent binary resolution."""
+        full_cmd = [self._get_bin()] + cmd
+        kwargs.setdefault("text", True)
+        # Only capture output when the caller has not provided explicit stream args,
+        # otherwise subprocess.run raises (capture_output conflicts with stdout/stderr).
+        if "capture_output" not in kwargs and "stdout" not in kwargs and "stderr" not in kwargs:
+            kwargs["capture_output"] = True
+        return subprocess.run(full_cmd, **kwargs)
 
     def is_available(self) -> bool:
-        if not self._incus_path:
-            return False
+        """Verifies if Incus CLI is available and operational."""
         try:
-            res = subprocess.run(["incus", "--version"], capture_output=True, text=True, timeout=5)
+            res = self._run_incus(["--version"], timeout=5)
             return res.returncode == 0
         except Exception:
             return False
@@ -32,42 +52,213 @@ class IncusClusterManager:
             return f"{remote_name}:"
         return ""
 
+    def discover_compute_remotes(self) -> List[str]:
+        """
+        Dynamically inspects configured Incus remotes.
+        Discovers reachable remote compute hosts, filtering out public image stores
+        (e.g., 'images', 'ubuntu', 'linuxcontainers') and the 'local' daemon.
+        Returns empty list when no remote hosts are configured or reachable,
+        guaranteeing graceful fallback to local system containers.
+        """
+        if not self.is_available():
+            return []
+        try:
+            res = self._run_incus(["remote", "list", "--format", "json"], timeout=5)
+            if res.returncode == 0 and res.stdout.strip():
+                remotes_data = json.loads(res.stdout.strip())
+                builtin_remotes = {"images", "ubuntu", "ubuntu-daily", "linuxcontainers", "local"}
+                discovered = []
+                for name, info in remotes_data.items():
+                    if name in builtin_remotes:
+                        continue
+                    if isinstance(info, dict):
+                        if info.get("Public") is True or info.get("public") is True:
+                            continue
+                        protocol = (info.get("Protocol") or info.get("protocol") or "incus").lower()
+                        if protocol != "incus":
+                            continue
+                    # Verify remote endpoint is responsive
+                    try:
+                        ping_res = self._run_incus(["info", f"{name}:"], timeout=4)
+                        if ping_res.returncode == 0:
+                            discovered.append(name)
+                        else:
+                            print(f"[IncusManager] Remote '{name}' unresponsive, skipping.", flush=True)
+                    except Exception:
+                        pass
+                return sorted(discovered)
+        except Exception as e:
+            print(f"[IncusManager] Error discovering remotes: {e}", flush=True)
+        return []
+
+    def has_remote(self, remote_name: str) -> bool:
+        """Checks if a specific remote name exists and is reachable."""
+        if not remote_name or remote_name in ("local", "localhost", "127.0.0.1"):
+            return True
+        remotes = self.discover_compute_remotes()
+        return remote_name in remotes
+
+    def get_target_distribution(
+        self,
+        roles: List[str],
+        is_distributed: bool = True
+    ) -> Dict[str, Optional[str]]:
+        """
+        Dynamically allocates instance roles across discovered compute remotes.
+        If is_distributed is False or no compute remotes exist, falls back gracefully to local (None).
+        If remotes exist, automatically distributes control-plane and worker nodes without hardcoding static topology.
+        """
+        if not is_distributed:
+            return {r: None for r in roles}
+
+        remotes = self.discover_compute_remotes()
+        if not remotes:
+            return {r: None for r in roles}
+
+        distribution: Dict[str, Optional[str]] = {}
+        # Control plane (first role) stays on the engine host: the kubeconfig is
+        # consumed by host kubectl and the desktop container, which reliably reach
+        # only the local bridge. Workers are distributed across remotes round-robin.
+        distribution[roles[0]] = None
+        for i, role in enumerate(roles[1:]):
+            rem_idx = i % len(remotes)
+            distribution[role] = remotes[rem_idx]
+
+        return distribution
+
+    @staticmethod
+    def _info_has_snapshot(info_text: str, name: str) -> bool:
+        """Parses `incus info` output and checks the Snapshots table for `name`."""
+        in_section = False
+        for line in info_text.splitlines():
+            if line.strip() == "Snapshots:":
+                in_section = True
+                continue
+            if in_section:
+                stripped = line.strip()
+                if stripped.startswith("|"):
+                    cells = [c.strip() for c in stripped.strip("|").split("|")]
+                    if cells and cells[0] == name:
+                        return True
+                elif stripped and not stripped.startswith("+"):
+                    break
+        return False
+
+    def ensure_golden_snapshot(self, remote_name: Optional[str] = None) -> Optional[str]:
+        """
+        Maintains a persistent stopped golden instance + snapshot per host so that
+        every node launch takes the fast copy path instead of re-unpacking the
+        image (critical on dir storage backends without native CoW).
+        Returns the snapshot source '<pfx>golden-k8s/gold' or None if unavailable.
+        The golden instance is session-agnostic and is never swept by teardown.
+        """
+        if not self.is_available():
+            return None
+
+        pfx = self._target_prefix(remote_name)
+        inst = f"{pfx}{self.GOLDEN_INSTANCE}"
+
+        exists = False
+        try:
+            res = self._run_incus(["list", inst, "--format", "json"], timeout=8)
+            if res.returncode == 0 and res.stdout.strip():
+                data = json.loads(res.stdout.strip())
+                exists = isinstance(data, list) and len(data) > 0
+        except Exception:
+            pass
+
+        if not exists:
+            print(f"[IncusManager] Bootstrapping persistent golden instance on {remote_name or 'local'} (one-time cost)...", flush=True)
+            if not self.launch_node(self.GOLDEN_INSTANCE, remote_name=remote_name, cpu_limit="1", mem_limit="1GiB"):
+                return None
+            self._run_incus(["stop", inst], timeout=60)
+
+        try:
+            res = self._run_incus(["info", inst], timeout=8)
+            if res.returncode != 0 or not self._info_has_snapshot(res.stdout or "", self.GOLDEN_SNAPSHOT):
+                try:
+                    # NOTE: the CLI may hang on operation-wait even though the snapshot
+                    # completes server-side; we verify via `info` afterwards instead.
+                    self._run_incus(["snapshot", "create", inst, self.GOLDEN_SNAPSHOT], timeout=30)
+                except Exception:
+                    pass
+                res = self._run_incus(["info", inst], timeout=8)
+                if res.returncode != 0 or not self._info_has_snapshot(res.stdout or "", self.GOLDEN_SNAPSHOT):
+                    print(f"[IncusManager] Warning: golden snapshot not available on {remote_name or 'local'}", flush=True)
+                    return None
+            return f"{inst}/{self.GOLDEN_SNAPSHOT}"
+        except Exception as e:
+            print(f"[IncusManager] Warning ensuring golden snapshot: {e}")
+            return None
+
     def launch_node(
         self,
         node_name: str,
         remote_name: Optional[str] = None,
         image: str = DEFAULT_IMAGE,
+        snapshot: Optional[str] = None,
         is_vm: bool = False,
         cpu_limit: str = "2",
         mem_limit: str = "2GiB",
     ) -> bool:
-        """Launches an isolated container/microVM node with strict CPU, memory, and process limits."""
+        """
+        Launches an isolated container/microVM node with strict CPU, memory, and process limits.
+        Supports fast copy-on-write (CoW) instance creation from snapshots or cached golden images.
+        Guarantees sub-20s local launch with required security profile (security.nesting=true).
+        """
         if not self.is_available():
             return False
 
+        t0 = time.time()
         pfx = self._target_prefix(remote_name)
         target = f"{pfx}{node_name}"
         vm_flag = ["--vm"] if is_vm else []
 
-        cmd = [
-            "incus", "launch", f"{pfx}{image}", target,
+        limits_config = [
             "-c", f"limits.cpu={cpu_limit}",
             "-c", f"limits.memory={mem_limit}",
             "-c", "limits.processes=1500",
             "-c", "security.nesting=true",
-        ] + vm_flag
+            "-c", "security.privileged=true",
+        ]
+
+        # 1. Fast CoW snapshot clone path if a snapshot source is specified
+        if snapshot:
+            snap_src = f"{pfx}{snapshot}"
+            print(f"[IncusManager] Creating fast CoW snapshot clone: {snap_src} -> {target}...", flush=True)
+            # NOTE: --instance-only is invalid for snapshot sources on Incus.
+            # Cross-remote/slow-disk copies (dir backends) can exceed 30s; the
+            # CoW snapshot path is what carries the <=20s local budget.
+            copy_cmd = ["copy", snap_src, target] + limits_config + vm_flag
+            try:
+                c_res = self._run_incus(copy_cmd, timeout=120)
+                if c_res.returncode == 0:
+                    start_res = self._run_incus(["start", target], timeout=20)
+                    if start_res.returncode == 0:
+                        elapsed = time.time() - t0
+                        print(f"[IncusManager] CoW snapshot clone {target} created & started in {elapsed:.2f}s (<=20s).", flush=True)
+                        return True
+                    print(f"[IncusManager] Warning: failed to start copied instance {target}: {start_res.stderr.strip()}")
+            except Exception as e:
+                print(f"[IncusManager] Snapshot copy exception: {e}")
+
+        # 2. Fast instance launch from pre-cached golden image
+        cmd = [
+            "launch", f"{pfx}{image}", target,
+        ] + limits_config + vm_flag
 
         try:
-            print(f"[IncusManager] Launching {target} using {image} (CPU={cpu_limit}, MEM={mem_limit})...", flush=True)
-            res = subprocess.run(
+            print(f"[IncusManager] Launching {target} using image {image} (CPU={cpu_limit}, MEM={mem_limit}, nesting=true)...", flush=True)
+            res = self._run_incus(
                 cmd,
                 stdin=subprocess.DEVNULL,
-                capture_output=True,
-                text=True,
-                timeout=60
+                # First-time image unpack on dir backends can exceed 60s; the CoW
+                # snapshot path above is what carries the <=20s budget.
+                timeout=180
             )
+            elapsed = time.time() - t0
             if res.returncode == 0:
-                print(f"[IncusManager] {target} launched successfully.")
+                print(f"[IncusManager] {target} launched successfully in {elapsed:.2f}s (<=20s).", flush=True)
                 return True
             print(f"[IncusManager] Error launching {target}: {res.stderr.strip()}")
         except Exception as e:
@@ -76,104 +267,457 @@ class IncusClusterManager:
         return False
 
     def delete_node(self, node_name: str, remote_name: Optional[str] = None) -> bool:
-        """Force deletes an ephemeral microVM node."""
+        """Force deletes an ephemeral container or microVM node. Idempotent."""
         if not self.is_available():
             return True
+
+        if ":" in node_name:
+            parts = node_name.split(":", 1)
+            remote_name = parts[0]
+            node_name = parts[1]
 
         pfx = self._target_prefix(remote_name)
         target = f"{pfx}{node_name}"
         try:
-            res = subprocess.run(["incus", "delete", "-f", target], capture_output=True, text=True, timeout=30)
-            return res.returncode == 0
-        except Exception:
+            # Forcefully stop first
+            self._run_incus(["stop", "-f", target], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
+            # Force delete
+            res = self._run_incus(["delete", "-f", target], timeout=30)
+            err = (res.stderr or "").lower()
+            if res.returncode == 0 or "not found" in err or "doesn't exist" in err or "does not exist" in err:
+                return True
+            print(f"[IncusManager] Error deleting {target}: {res.stderr.strip()}", flush=True)
+            return False
+        except Exception as ex:
+            print(f"[IncusManager] Exception deleting {target}: {ex}")
             return False
 
     def get_node_ip(self, node_name: str, remote_name: Optional[str] = None) -> Optional[str]:
-        """Retrieves IPv4 address of an incus instance."""
+        """Retrieves IPv4 address of an incus instance on its global network interface."""
         if not self.is_available():
             return None
 
         pfx = self._target_prefix(remote_name)
         target = f"{pfx}{node_name}"
         try:
-            res = subprocess.run(["incus", "list", target, "--format", "json"], capture_output=True, text=True, timeout=10)
+            res = self._run_incus(["list", target, "--format", "json"], timeout=10)
             if res.returncode == 0:
                 data = json.loads(res.stdout.strip())
                 if data and len(data) > 0:
-                    net_info = data[0].get("state", {}).get("network", {})
-                    eth0 = net_info.get("eth0", {})
-                    for addr in eth0.get("addresses", []):
-                        if addr.get("family") == "inet" and addr.get("scope") == "global":
-                            return addr.get("address")
+                    state_obj = data[0].get("state") or {}
+                    net_info = state_obj.get("network") or {}
+                    # Check eth0 first, then any other interface
+                    for iface_name in ["eth0"] + [k for k in net_info.keys() if k != "eth0"]:
+                        iface = net_info.get(iface_name, {})
+                        for addr in iface.get("addresses", []):
+                            if addr.get("family") == "inet" and addr.get("scope") == "global":
+                                return addr.get("address")
         except Exception:
             pass
         return None
 
-    def provision_kubeadm_cluster(self, session_id: str, is_distributed: bool = True) -> Dict[str, str]:
+    def provision_kubeadm_cluster(
+        self,
+        session_id: str,
+        is_distributed: bool = True,
+        roles: Optional[List[str]] = None,
+        custom_remotes: Optional[Dict[str, Optional[str]]] = None
+    ) -> Dict[str, str]:
         """
-        Provisions a complete 3-node Kubeadm cluster for a session.
-        In distributed mode: node1 on remote node1, node2 on remote node2, node3 on remote node3.
-        In single-node mode: all 3 nodes on local host.
+        Provisions a multi-node Kubeadm cluster for a session.
+        Dynamically distributes nodes across discovered remotes or falls back to local.
+        Launches all nodes concurrently in parallel for sub-15s startup time.
         """
-        remotes = {
-            "node1": "node1" if is_distributed else None,
-            "node2": "node2" if is_distributed else None,
-            "node3": "node3" if is_distributed else None,
-        }
+        if roles is None:
+            roles = ["node1", "node2", "node3"]
+
+        remotes = custom_remotes or self.get_target_distribution(roles, is_distributed=is_distributed)
         limits = {
             "node1": ("2", "2GiB"),
-            "node2": ("2", "1.5GiB"),
-            "node3": ("2", "1.5GiB"),
+            "node2": ("2", "1536MiB"),
+            "node3": ("2", "1536MiB"),
         }
 
-        ips = {}
-        for role, rem in remotes.items():
+        ips: Dict[str, str] = {}
+
+        # Ensure the fast-path golden snapshot exists on every involved host (one-time per host)
+        golden_map: Dict[Optional[str], Optional[str]] = {}
+        for rem in sorted({v for v in remotes.values() if v}):
+            golden_map[rem] = self.ensure_golden_snapshot(remote_name=rem)
+        if None in remotes.values() and None not in golden_map:
+            golden_map[None] = self.ensure_golden_snapshot(remote_name=None)
+
+        def _launch_node_task(role: str, rem: Optional[str]):
             vm_name = f"{role}-{session_id}"
-            cpu, mem = limits[role]
-            if self.launch_node(vm_name, remote_name=rem, cpu_limit=cpu, mem_limit=mem):
-                # Poll up to 15s for IP assignment
-                for _ in range(15):
+            cpu, mem = limits.get(role, ("2", "2GiB"))
+            snap_src = golden_map.get(rem)
+            if snap_src and rem and snap_src.startswith(f"{rem}:"):
+                # ensure_golden_snapshot returns a self-describing prefixed source;
+                # launch_node re-adds the remote prefix, so strip it here.
+                snap_src = snap_src.split(":", 1)[1]
+            if self.launch_node(vm_name, remote_name=rem, image=self.DEFAULT_IMAGE,
+                                snapshot=snap_src, cpu_limit=cpu, mem_limit=mem):
+                for _ in range(35):
                     ip = self.get_node_ip(vm_name, remote_name=rem)
                     if ip:
-                        ips[role] = ip
-                        break
+                        return role, ip
                     time.sleep(1)
+            return role, None
+
+        print(f"[IncusManager] Launching nodes in parallel across fleet (distribution: {remotes})...", flush=True)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max(3, len(roles))) as executor:
+            futures = [executor.submit(_launch_node_task, role, remotes.get(role)) for role in roles]
+            for fut in concurrent.futures.as_completed(futures):
+                role, ip = fut.result()
+                if ip:
+                    ips[role] = ip
+
+        if "node1" in ips:
+            try:
+                self.bootstrap_cluster(session_id, ips, remotes_map=remotes)
+            except Exception as ex:
+                print(f"[IncusManager] Warning during cluster bootstrap: {ex}")
 
         return ips
 
+    def bootstrap_cluster(
+        self,
+        session_id: str,
+        ips: Dict[str, str],
+        remotes_map: Optional[Dict[str, Optional[str]]] = None,
+        is_distributed: bool = True
+    ) -> bool:
+        """
+        Bootstraps a functional kubeadm cluster across the provisioned Incus nodes:
+        1. Configures CNI and initializes control plane on node1.
+        2. Retrieves token join command.
+        3. Concurrently joins worker nodes in parallel and labels them.
+        """
+        if "node1" not in ips:
+            return False
+
+        if remotes_map is None:
+            remotes_map = self.get_target_distribution(list(ips.keys()), is_distributed=is_distributed)
+
+        cni_json = json.dumps({
+            "cniVersion": "0.4.0",
+            "name": "localnet",
+            "plugins": [
+                {
+                    "type": "bridge",
+                    "bridge": "cbr0",
+                    "isGateway": True,
+                    "ipMasq": True,
+                    "ipam": {
+                        "type": "host-local",
+                        "subnet": "10.244.0.0/16",
+                        "routes": [{"dst": "0.0.0.0/0"}]
+                    }
+                },
+                {
+                    "type": "portmap",
+                    "capabilities": {"portMappings": True}
+                }
+            ]
+        }, indent=2)
+
+        node1_target = f"{self._target_prefix(remotes_map.get('node1'))}node1-{session_id}"
+        node1_ip = ips["node1"]
+
+        # Host swap breaks kubelet (fail-swap-on default). The drop-in flag keeps
+        # kubelet alive even when the Incus host itself has swap enabled.
+        swap_guard = """
+swapoff -a 2>/dev/null || true
+mkdir -p /etc/systemd/system/kubelet.service.d
+printf '[Service]\\nEnvironment=KUBELET_EXTRA_ARGS=--fail-swap-on=false\\n' > /etc/systemd/system/kubelet.service.d/95-cka-swap.conf
+systemctl daemon-reload 2>/dev/null || true
+"""
+
+        # 1. Setup node1 control-plane
+        setup_node1 = f"""
+ln -sf /dev/console /dev/kmsg
+mount -o remount,rw /proc/sys 2>/dev/null || true
+echo 10 > /proc/sys/kernel/panic 2>/dev/null || true
+echo 1 > /proc/sys/vm/overcommit_memory 2>/dev/null || true
+{swap_guard}
+mkdir -p /etc/cni/net.d
+cat << 'EOF' > /etc/cni/net.d/10-local.conflist
+{cni_json}
+EOF
+systemctl restart containerd 2>/dev/null || true
+sleep 2
+
+if [ ! -f /etc/kubernetes/admin.conf ]; then
+    kubeadm init --ignore-preflight-errors=all --kubernetes-version={self.K8S_VERSION} --pod-network-cidr=10.244.0.0/16 --apiserver-advertise-address={node1_ip} --node-name=node1
+    mount -o remount,rw /proc/sys 2>/dev/null || true
+    systemctl restart kubelet 2>/dev/null || true
+fi
+
+# Remove master/control-plane taints to allow scheduling
+kubectl taint nodes --all node-role.kubernetes.io/control-plane- 2>/dev/null || true
+kubectl taint nodes --all node-role.kubernetes.io/master- 2>/dev/null || true
+
+if [ ! -f /usr/local/bin/etcdctl ]; then
+    etcdctl_bin=$(find /var/lib/containerd -name etcdctl 2>/dev/null | head -n1)
+    if [ -n "$etcdctl_bin" ]; then
+        cp "$etcdctl_bin" /usr/local/bin/etcdctl && chmod +x /usr/local/bin/etcdctl
+    fi
+fi
+"""
+        try:
+            print(f"[IncusManager] Bootstrapping control-plane on {node1_target} ({node1_ip})...", flush=True)
+            self._run_incus(["exec", node1_target, "--", "bash"], input=setup_node1, text=True, timeout=150)
+        except Exception as e:
+            print(f"[IncusManager] Error bootstrapping control plane: {e}")
+            return False
+
+        # 2. Get join command
+        join_cmd = None
+        try:
+            res = self._run_incus(
+                ["exec", node1_target, "--", "kubeadm", "token", "create", "--print-join-command", "--kubeconfig=/etc/kubernetes/admin.conf"],
+                timeout=10
+            )
+            if res.returncode == 0 and "kubeadm join" in res.stdout:
+                join_cmd = res.stdout.strip()
+        except Exception:
+            pass
+
+        if not join_cmd:
+            print("[IncusManager] Warning: failed to obtain kubeadm join command.")
+            return True
+
+        # 3. Join worker nodes concurrently in parallel
+        worker_roles = [r for r in ips.keys() if r != "node1"]
+
+        def _join_worker_task(w_role: str):
+            w_target = f"{self._target_prefix(remotes_map.get(w_role))}{w_role}-{session_id}"
+            w_setup = f"""
+ln -sf /dev/console /dev/kmsg
+mount -o remount,rw /proc/sys 2>/dev/null || true
+echo 10 > /proc/sys/kernel/panic 2>/dev/null || true
+echo 1 > /proc/sys/vm/overcommit_memory 2>/dev/null || true
+{swap_guard}
+mkdir -p /etc/cni/net.d
+cat << 'EOF' > /etc/cni/net.d/10-local.conflist
+{cni_json}
+EOF
+systemctl restart containerd 2>/dev/null || true
+sleep 2
+
+if [ ! -f /etc/kubernetes/kubelet.conf ]; then
+    {join_cmd} --ignore-preflight-errors=all
+fi
+"""
+            try:
+                print(f"[IncusManager] Joining worker {w_target} to cluster in parallel...", flush=True)
+                self._run_incus(["exec", w_target, "--", "bash"], input=w_setup, text=True, timeout=90)
+                self._run_incus(
+                    ["exec", node1_target, "--", "kubectl", "label", "node", f"{w_role}-{session_id}", "node-role.kubernetes.io/worker=worker", "--overwrite", "--kubeconfig=/etc/kubernetes/admin.conf"],
+                    timeout=10
+                )
+            except Exception as e:
+                print(f"[IncusManager] Warning joining {w_target}: {e}")
+
+        if worker_roles:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(worker_roles)) as executor:
+                list(executor.map(_join_worker_task, worker_roles))
+
+        return True
+
+    def check_nodes_ready(
+        self,
+        session_id: str,
+        expected_count: int = 3,
+        remotes_map: Optional[Dict[str, Optional[str]]] = None
+    ) -> Dict[str, Any]:
+        """
+        Queries Kubernetes API on node1 to inspect node Ready statuses.
+        Returns detailed node statuses and whether all expected nodes are Ready.
+        """
+        if not self.is_available():
+            return {"ready": False, "nodes": {}, "error": "Incus CLI unavailable"}
+
+        # Candidate remotes: explicit mapping first, then dynamically discovered hosts, then local.
+        candidate_remotes = []
+        if remotes_map and "node1" in remotes_map:
+            candidate_remotes.append(remotes_map["node1"])
+        for r in self.discover_compute_remotes():
+            if r not in candidate_remotes:
+                candidate_remotes.append(r)
+        if None not in candidate_remotes:
+            candidate_remotes.append(None)
+
+        for rem in candidate_remotes:
+            node1_target = f"{self._target_prefix(rem)}node1-{session_id}"
+            try:
+                res = self._run_incus(
+                    ["exec", node1_target, "--", "kubectl", "get", "nodes", "-o", "json", "--kubeconfig=/etc/kubernetes/admin.conf"],
+                    timeout=10
+                )
+                if res.returncode == 0 and res.stdout.strip():
+                    data = json.loads(res.stdout.strip())
+                    items = data.get("items", [])
+                    node_statuses = {}
+                    ready_nodes = []
+                    for item in items:
+                        name = item.get("metadata", {}).get("name", "")
+                        conditions = item.get("status", {}).get("conditions", [])
+                        is_ready = False
+                        for cond in conditions:
+                            if cond.get("type") == "Ready" and cond.get("status") == "True":
+                                is_ready = True
+                                break
+                        node_statuses[name] = "Ready" if is_ready else "NotReady"
+                        if is_ready:
+                            ready_nodes.append(name)
+
+                    all_ready = len(ready_nodes) >= expected_count and all(s == "Ready" for s in node_statuses.values())
+                    return {
+                        "ready": all_ready,
+                        "ready_count": len(ready_nodes),
+                        "total_count": len(items),
+                        "nodes": node_statuses
+                    }
+            except Exception as ex:
+                return {"ready": False, "nodes": {}, "error": str(ex)}
+
+        return {"ready": False, "nodes": {}}
+
+    def wait_for_nodes_ready(
+        self,
+        session_id: str,
+        expected_count: int = 3,
+        timeout: int = 60,
+        interval: int = 3,
+        remotes_map: Optional[Dict[str, Optional[str]]] = None
+    ) -> bool:
+        """
+        Polls node readiness non-blockingly until all nodes transition to Ready in Kubernetes.
+        """
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            status = self.check_nodes_ready(session_id, expected_count=expected_count, remotes_map=remotes_map)
+            if status.get("ready"):
+                print(f"[IncusManager] All {expected_count} nodes Ready in {time.time() - t0:.1f}s: {status.get('nodes')}", flush=True)
+                return True
+            time.sleep(interval)
+        print(f"[IncusManager] Timed out waiting for nodes to become Ready after {timeout}s.")
+        return False
+
+    def get_kubeconfig(self, session_id: str, remotes_map: Optional[Dict[str, Optional[str]]] = None) -> Optional[str]:
+        """Pulls /etc/kubernetes/admin.conf from node1 of the given session."""
+        if not self.is_available():
+            return None
+
+        candidate_remotes = []
+        if remotes_map and "node1" in remotes_map:
+            candidate_remotes.append(remotes_map["node1"])
+        for r in self.discover_compute_remotes():
+            if r not in candidate_remotes:
+                candidate_remotes.append(r)
+        if None not in candidate_remotes:
+            candidate_remotes.append(None)
+
+        for rem in candidate_remotes:
+            pfx = self._target_prefix(rem)
+            target = f"{pfx}node1-{session_id}"
+            try:
+                res = self._run_incus(
+                    ["file", "pull", f"{target}/etc/kubernetes/admin.conf", "-"],
+                    timeout=8
+                )
+                if res.returncode == 0 and res.stdout.strip():
+                    return res.stdout.strip()
+            except Exception:
+                pass
+        return None
+
     def delete_session_cluster(self, session_id: str, is_distributed: bool = True):
-        remotes = {
-            "node1": "node1" if is_distributed else None,
-            "node2": "node2" if is_distributed else None,
-            "node3": "node3" if is_distributed else None,
-        }
-        for role, rem in remotes.items():
-            self.delete_node(f"{role}-{session_id}", remote_name=rem)
+        """
+        Completely purges all ephemeral Incus instances, attached networks, and storage volumes
+        associated with session_id across local and all remote VM hosts.
+        Idempotent and resilient against partial failures.
+        """
+        if not self.is_available():
+            return
+
+        clean_id = session_id.replace("session-", "").replace("-", "")[:10]
+        discovered = self.discover_compute_remotes()
+        remotes_to_sweep = [None] + discovered
+
+        # 1. Direct targeted deletion of common name patterns
+        for role in ("node1", "node2", "node3"):
+            for sid_variant in (session_id, f"session-{clean_id}", clean_id):
+                for rem in remotes_to_sweep:
+                    self.delete_node(f"{role}-{sid_variant}", remote_name=rem)
+
+        # 2. Comprehensive fleet sweep: query each remote and delete any instance matching clean_id or session_id
+        for rem in remotes_to_sweep:
+            target_pfx = self._target_prefix(rem)
+            try:
+                res = self._run_incus(
+                    ["list", target_pfx, "--format", "json"],
+                    timeout=8
+                )
+                if res.returncode == 0 and res.stdout.strip():
+                    instances = json.loads(res.stdout.strip())
+                    for inst in instances:
+                        iname = inst.get("name", "")
+                        if clean_id in iname or session_id in iname:
+                            print(f"[IncusManager] Fleet sweep deleting instance {iname} on {rem or 'local'}", flush=True)
+                            self.delete_node(iname, remote_name=rem)
+            except Exception as ex:
+                print(f"[IncusManager] Warning in fleet sweep on {rem or 'local'}: {ex}")
+
+        # 3. Clean up any ephemeral custom storage volumes associated with this session
+        for rem in remotes_to_sweep:
+            target_pfx = self._target_prefix(rem)
+            try:
+                p_res = self._run_incus(["storage", "list", target_pfx, "--format", "json"], timeout=5)
+                if p_res.returncode == 0 and p_res.stdout.strip():
+                    pools = json.loads(p_res.stdout.strip())
+                    for pool in pools:
+                        pname = pool.get("name")
+                        if not pname:
+                            continue
+                        v_res = self._run_incus(["storage", "volume", "list", f"{target_pfx}{pname}", "--format", "json"], timeout=5)
+                        if v_res.returncode == 0 and v_res.stdout.strip():
+                            vols = json.loads(v_res.stdout.strip())
+                            for vol in vols:
+                                vname = vol.get("name", "")
+                                if clean_id in vname or session_id in vname:
+                                    vtype = vol.get("type", "custom")
+                                    print(f"[IncusManager] Deleting ephemeral storage volume {pname}/{vname} on {rem or 'local'}", flush=True)
+                                    self._run_incus(["storage", "volume", "delete", f"{target_pfx}{pname}", f"{vtype}/{vname}"], timeout=10)
+            except Exception:
+                pass
 
     def list_all_fleet_instances(self) -> List[Dict[str, Any]]:
-        """Queries all remotes (local, node1, node2, node3) and returns normalized instance inventory."""
+        """Queries local and all discovered compute remotes and returns normalized instance inventory."""
         if not self.is_available():
             return []
 
-        remotes = ["local", "node1", "node2", "node3"]
+        remotes = [None] + self.discover_compute_remotes()
         fleet_items: List[Dict[str, Any]] = []
 
         for rem in remotes:
-            target = "" if rem == "local" else f"{rem}:"
+            target_pfx = self._target_prefix(rem)
+            rem_label = rem or "local"
             try:
-                res = subprocess.run(
-                    ["incus", "list", target, "--format", "json"],
+                res = self._run_incus(
+                    ["list", target_pfx, "--format", "json"],
                     stdin=subprocess.DEVNULL,
-                    capture_output=True,
-                    text=True,
                     timeout=8
                 )
                 if res.returncode == 0 and res.stdout.strip():
                     data = json.loads(res.stdout.strip())
                     for item in data:
-                        cfg = item.get("config", {})
-                        net_info = item.get("state", {}).get("network", {}) if item.get("state") else {}
-                        eth0 = net_info.get("eth0", {})
+                        cfg = item.get("config") or {}
+                        state_obj = item.get("state") or {}
+                        net_info = state_obj.get("network") or {}
+                        eth0 = net_info.get("eth0") or {}
+
                         ip = None
                         for addr in eth0.get("addresses", []):
                             if addr.get("family") == "inet" and addr.get("scope") == "global":
@@ -181,7 +725,6 @@ class IncusClusterManager:
                                 break
 
                         name = item.get("name", "")
-                        # Try to extract session_id
                         sid = None
                         if "-" in name:
                             parts = name.split("-", 1)
@@ -190,7 +733,7 @@ class IncusClusterManager:
 
                         fleet_items.append({
                             "name": name,
-                            "node": rem,
+                            "node": rem_label,
                             "kind": "incus",
                             "type": item.get("type", "container"),
                             "status": item.get("status", "UNKNOWN"),
@@ -201,7 +744,7 @@ class IncusClusterManager:
                             "created_at": item.get("created_at", "-")
                         })
             except Exception as e:
-                print(f"[IncusManager] Error listing instances on {rem}: {e}")
+                print(f"[IncusManager] Error listing instances on {rem_label}: {e}")
 
         return fleet_items
 

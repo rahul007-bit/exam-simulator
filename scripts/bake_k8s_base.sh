@@ -3,7 +3,7 @@ set -euo pipefail
 
 echo "===> [1/6] Launching template container k8s-base on node1..."
 incus delete -f k8s-base 2>/dev/null || true
-incus launch debian-12-c k8s-base \
+incus launch debian-12 k8s-base \
   -c limits.cpu=2 \
   -c limits.memory=2GiB \
   -c limits.processes=1500 \
