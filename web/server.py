@@ -5,6 +5,7 @@ import json
 import time
 import secrets
 import subprocess
+import threading
 import pty
 import select
 import struct
@@ -202,6 +203,45 @@ def is_container_running(sid: Optional[str]) -> bool:
     return container_name in running_set
 
 
+_desktop_restore_inflight: set = set()
+_desktop_restore_lock = threading.Lock()
+
+
+def auto_restore_desktop(sid: Optional[str]) -> None:
+    """Restores a missing desktop container only for a genuinely live session.
+
+    Guards against:
+    - stale state snapshots of submitted/terminated sessions;
+    - the teardown race: a browser VNC auto-reconnect while
+      teardown_session is deleting resources used to re-create the desktop
+      mid-teardown. teardown now deregisters the session FIRST, and here we
+      re-check liveness inside an in-flight lock so concurrent reconnects
+      neither resurrect a dying session nor double-start the desktop.
+    """
+    if not sid:
+        return
+    with _desktop_restore_lock:
+        if sid in _desktop_restore_inflight:
+            return
+        _desktop_restore_inflight.add(sid)
+    try:
+        if not redis_bus.is_session_active(sid):
+            return
+        state = redis_bus.get_session_state(sid) or {}
+        if state.get("status", "active") != "active":
+            return
+        if is_container_running(sid):
+            return
+        res_info = get_system_resource_info()
+        if res_info.get("available_mem_mb", 0) < 350:
+            return
+        print(f"[AutoRestore] Container for active session {sid} was not running. Automatically restored.", flush=True)
+        desktop_mgr.start_desktop(sid)
+    finally:
+        with _desktop_restore_lock:
+            _desktop_restore_inflight.discard(sid)
+
+
 def _is_docker_container_active(cname: str) -> bool:
     """Direct live inspect to confirm container is running without caching delay."""
     try:
@@ -371,11 +411,7 @@ def get_session(request: Request):
     # Only when the session is genuinely registered as active (not a stale
     # state snapshot from a submitted/terminated session).
     if session and session.session_id and session.status == "active":
-        if redis_bus.is_session_active(session.session_id) and not is_container_running(session.session_id):
-            res_info = get_system_resource_info()
-            if res_info.get("available_mem_mb", 0) >= 350:
-                print(f"[AutoRestore] Container for active session {session.session_id} was not running. Automatically restored.", flush=True)
-                desktop_mgr.start_desktop(session.session_id)
+        auto_restore_desktop(session.session_id)
 
     # Touch activity timestamp for idle timeout tracking
     now_utc = datetime.now(timezone.utc)
@@ -1643,44 +1679,45 @@ async def terminal_websocket(websocket: WebSocket, session_id: Optional[str] = N
     is_admin = is_admin_authenticated(websocket)
     actor = "admin" if is_admin else "candidate"
     param_sid = session_id or websocket.query_params.get("session_id")
-    
+    explicit_sid: Optional[str] = param_sid if (param_sid and param_sid not in ("default", "active")) else None
+
     # Resolve target container & session ID cleanly (never fall back to host shell)
     target_container: Optional[str] = None
     sid: Optional[str] = None
 
-    # Wait up to 12 seconds for container if it is currently starting up
-    for attempt in range(24):
-        # 1. Specified param_sid
-        if param_sid and param_sid not in ("default", "active"):
-            cname = f"cka-desktop-{param_sid}"
-            if _is_docker_container_active(cname):
-                target_container = cname
-                sid = param_sid
-                break
+    # Admins must attach explicitly: a stale admin terminal tab must never
+    # auto-follow whatever session becomes active next (that injected stray
+    # ADMIN_TERMINAL_* events into unrelated candidate sessions).
+    if is_admin and not explicit_sid:
+        try:
+            await websocket.send_bytes(
+                b"\r\n\x1b[33m[Admin] Explicit session required: use /ws/terminal/<session_id>.\x1b[0m\r\n"
+            )
+            await asyncio.sleep(1)
+            await websocket.close(code=1008)
+        except Exception:
+            pass
+        return
 
-        # 2. Deployer active session from file or Redis
-        session = deployer.load_active_session(loader)
-        if session and session.session_id:
-            cname = f"cka-desktop-{session.session_id}"
-            if _is_docker_container_active(cname):
-                target_container = cname
-                sid = session.session_id
-                break
-
-        # 3. Redis active session ID
+    # Candidates may only attach to their own active session (same rule as the
+    # VNC proxy): the requested sid — or the fallback — must BE the active one.
+    if not is_admin:
         active_sid = redis_bus.get_active_session_id()
-        if active_sid:
-            cname = f"cka-desktop-{active_sid}"
-            if _is_docker_container_active(cname):
-                target_container = cname
-                sid = active_sid
-                break
+        target_sid = explicit_sid or active_sid
+        if not target_sid or (active_sid and target_sid != active_sid):
+            print(f"[Terminal] Forbidden: candidate attempted to access session {param_sid} (active: {active_sid})", flush=True)
+            await websocket.close(code=1008)
+            return
+        explicit_sid = target_sid
 
-        # 4. Any running cka-desktop-* container
-        running = _find_running_desktop_containers()
-        if running:
-            target_container = running[0]
-            sid = target_container.replace("cka-desktop-", "")
+    # Wait up to 12 seconds for the requested session's container — and never
+    # fall through to a different session (explicit requests must not silently
+    # attach elsewhere when their container is gone).
+    for attempt in range(24):
+        cname = f"cka-desktop-{explicit_sid}"
+        if _is_docker_container_active(cname):
+            target_container = cname
+            sid = explicit_sid
             break
 
         # If not ready on first try, show waiting banner to terminal
@@ -1883,11 +1920,7 @@ async def _proxy_vnc(websocket: WebSocket, session_id: Optional[str] = None):
     if sid:
         # Auto-Restore Container for Active Sessions (only when the session is
         # genuinely registered as active — never resurrect terminated ones).
-        if redis_bus.is_session_active(sid) and not is_container_running(sid):
-            res_info = get_system_resource_info()
-            if res_info.get("available_mem_mb", 0) >= 350:
-                print(f"[AutoRestore] Container for active session {sid} was not running. Automatically restored.", flush=True)
-                desktop_mgr.start_desktop(sid)
+        auto_restore_desktop(sid)
 
         # Check Redis registration, wait up to 10s if container is currently registering
         for _ in range(20):

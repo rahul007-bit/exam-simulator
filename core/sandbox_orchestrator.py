@@ -134,6 +134,20 @@ class SandboxOrchestrator:
         print(f"[Orchestrator] Tearing down session sandboxes: {session_id}", flush=True)
         clean_id = session_id.replace("session-", "").replace("-", "")[:10]
 
+        # 0. Deregister FIRST: the moment teardown begins, every auto-restore
+        #    path (get_session poll, VNC websocket reconnect) must treat this
+        #    session as dead. Resource deletion below takes many seconds; a
+        #    browser VNC auto-reconnect during that window otherwise
+        #    resurrects the desktop after teardown already stopped it.
+        try:
+            from core.redis_bus import bus as redis_bus0
+            if redis_bus0.is_available():
+                redis_bus0.deregister_session(session_id)
+                if clean_id:
+                    redis_bus0.deregister_session(clean_id)
+        except Exception as e:
+            print(f"[Orchestrator] Error deregistering session: {e}", flush=True)
+
         # 1. Candidate desktop container
         try:
             desktop_mgr.stop_desktop(session_id)

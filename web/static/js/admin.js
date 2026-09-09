@@ -697,6 +697,9 @@ async function terminateResourcePrompt(kind, node, name) {
     }
 }
 
+window.loadAdminInfrastructure = loadAdminInfrastructure;
+window.terminateResourcePrompt = terminateResourcePrompt;
+
 
 window.toggleTableRowMenu = function (e, menuId) {
     e.stopPropagation();
@@ -1060,12 +1063,13 @@ function renderAdminScorecard(scorecard) {
     if (!content) return;
 
     const passed = !!scorecard.passed;
-    const score = scorecard.score ?? 0;
-    const maxScore = scorecard.max_score ?? 100;
+    const score = scorecard.total_earned ?? scorecard.score ?? 0;
+    const maxScore = scorecard.total_possible ?? scorecard.max_score ?? 100;
     const pct = scorecard.percentage !== undefined ? scorecard.percentage : Math.round((score / Math.max(1, maxScore)) * 100);
 
     let tasksHtml = '';
-    const results = scorecard.task_results || scorecard.results || [];
+    const results = Array.isArray(scorecard.scorecard) ? scorecard.scorecard : (scorecard.task_results || scorecard.results || []);
+
     if (results.length > 0) {
         tasksHtml = `
             <table class="admin-table" style="margin-top: 16px;">
@@ -1109,7 +1113,8 @@ function renderAdminScorecard(scorecard) {
                 Final Score: ${pct}%
             </h3>
             <div style="font-size: 0.9rem; color: #94a3b8;">
-                Points: <strong>${score}</strong> / ${maxScore} | Exam: ${escapeHtml(scorecard.name || 'Exam Drill')}
+                Points: <strong>${score}</strong> / ${maxScore} | Exam: ${escapeHtml(scorecard.exam_name || scorecard.name || 'Exam Drill')}
+
             </div>
         </div>
         ${tasksHtml}
@@ -1283,12 +1288,14 @@ function renderReviewSidebar() {
         container.innerHTML = `
             <div class="timeline-list">
                 ${events.map((ev, idx) => {
-                    const t = ev.relative_time !== undefined ? ev.relative_time : 0;
+                    const etype = ev.event || ev.type || 'EVENT';
+                    const t = ev.rel_time !== undefined ? ev.rel_time
+                            : (ev.relative_time !== undefined ? ev.relative_time : 0);
                     const actorBadge = ev.actor === 'admin' ? '<span style="font-size:0.65rem; background:rgba(239,68,68,0.2); color:#fca5a5; padding:1px 4px; border-radius:3px;">ADMIN</span>' : '';
                     let badgeClass = 'badge-info';
-                    if (ev.type.includes('START') || ev.type.includes('CONNECT')) badgeClass = 'badge-success';
-                    else if (ev.type.includes('END') || ev.type.includes('FAIL') || ev.type.includes('DISCONNECT') || ev.type.includes('SUBMIT')) badgeClass = 'badge-danger';
-                    else if (ev.type.includes('FLAG') || ev.type.includes('WARNING')) badgeClass = 'badge-warning';
+                    if (etype.includes('START') || etype.includes('CONNECT')) badgeClass = 'badge-success';
+                    else if (etype.includes('END') || etype.includes('FAIL') || etype.includes('DISCONNECT') || etype.includes('SUBMIT')) badgeClass = 'badge-danger';
+                    else if (etype.includes('FLAG') || etype.includes('WARNING')) badgeClass = 'badge-warning';
 
                     return `
                         <div class="timeline-item" onclick="seekReplay(${t})" data-event-idx="${idx}">
@@ -1296,7 +1303,7 @@ function renderReviewSidebar() {
                                 <span class="timeline-time">${formatReplayTime(t)}</span>
                                 <div>
                                     ${actorBadge}
-                                    <span class="timeline-badge ${badgeClass}">${escapeHtml(ev.type)}</span>
+                                    <span class="timeline-badge ${badgeClass}">${escapeHtml(etype)}</span>
                                 </div>
                             </div>
                             <div style="font-size: 0.78rem; color: #cbd5e1; word-break: break-word;">
@@ -1319,7 +1326,9 @@ function renderReviewSidebar() {
         container.innerHTML = `
             <div class="timeline-list">
                 ${tasks.map(task => {
-                    const t = task.start_time || 0;
+                    const t = task.first_seen_time || 0;
+                    const dur = (task.last_seen_time && task.first_seen_time !== undefined)
+                        ? (task.last_seen_time - task.first_seen_time) : 0;
                     return `
                         <div class="timeline-item" onclick="seekReplay(${t})">
                             <div class="timeline-meta">
@@ -1330,8 +1339,8 @@ function renderReviewSidebar() {
                                 ${escapeHtml(task.title || 'Task Details')}
                             </div>
                             <div style="font-size: 0.74rem; color: #94a3b8; display: flex; justify-content: space-between; margin-top: 4px;">
-                                <span>Duration: ${task.duration ? formatDurationSeconds(task.duration) : '--:--'}</span>
-                                <span style="color: ${task.score > 0 ? '#34d399' : '#94a3b8'};">Score: ${task.score !== undefined ? `${task.score}/${task.points}` : '—'}</span>
+                                <span>Visits: ${task.visits || 1}${task.is_flagged ? ' · FLAGGED' : ''}</span>
+                                <span style="color: ${task.score > 0 ? '#34d399' : '#94a3b8'};">Score: ${task.score !== undefined && task.score !== null ? `${task.score}/${task.max_score}` : '—'}</span>
                             </div>
                         </div>
                     `;
