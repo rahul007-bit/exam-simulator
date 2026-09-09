@@ -1291,11 +1291,70 @@ function renderReviewSidebar() {
                     const etype = ev.event || ev.type || 'EVENT';
                     const t = ev.rel_time !== undefined ? ev.rel_time
                             : (ev.relative_time !== undefined ? ev.relative_time : 0);
+                    const data = ev.data || {};
+                    const prev = idx > 0 ? events[idx - 1] : null;
+                    const prevEtype = prev ? (prev.event || prev.type || '') : '';
+                    const prevData = prev ? (prev.data || {}) : {};
+
                     const actorBadge = ev.actor === 'admin' ? '<span style="font-size:0.65rem; background:rgba(239,68,68,0.2); color:#fca5a5; padding:1px 4px; border-radius:3px;">ADMIN</span>' : '';
                     let badgeClass = 'badge-info';
                     if (etype.includes('START') || etype.includes('CONNECT')) badgeClass = 'badge-success';
                     else if (etype.includes('END') || etype.includes('FAIL') || etype.includes('DISCONNECT') || etype.includes('SUBMIT')) badgeClass = 'badge-danger';
                     else if (etype.includes('FLAG') || etype.includes('WARNING')) badgeClass = 'badge-warning';
+
+                    let desc;
+                    if (etype === 'SESSION_START') {
+                        badgeClass = 'badge-primary';
+                        desc = `Exam started: ${escapeHtml(data.name || 'Mock Exam')} — ${data.total_tasks || '?'} tasks (${escapeHtml((data.contexts || []).join(', '))})`;
+                    } else if (etype === 'TASK_DEPLOYED') {
+                        badgeClass = 'badge-primary';
+                        const redeploy = prevEtype === 'TASK_DEPLOYED' && prevData.task_num === data.task_num;
+                        desc = `Task ${data.task_num}: [${escapeHtml(data.question_id || '')}] ${escapeHtml(data.title || '')}` +
+                               ` · ${escapeHtml(data.context || '')} · ${data.points || 0} pts${redeploy ? ' <span style="color:#94a3b8;">(re-deployed)</span>' : ''}`;
+                    } else if (etype === 'TASK_JUMP') {
+                        badgeClass = 'badge-primary';
+                        desc = `Jumped to Task ${data.task_num}${data.question_id ? ` [${escapeHtml(data.question_id)}]` : ''}`;
+                    } else if (etype === 'TASK_FLAGGED') {
+                        desc = `Flagged Task ${data.task_num} (${escapeHtml(data.question_id || '')})`;
+                    } else if (etype === 'TASK_UNFLAGGED') {
+                        desc = `Unflagged Task ${data.task_num} (${escapeHtml(data.question_id || '')})`;
+                    } else if (etype === 'TASK_RETRY') {
+                        desc = `Reset/Retry Task ${data.task_num}`;
+                    } else if (etype === 'TASK_EVALUATION') {
+                        const st = data.passed ? 'PASS' : 'FAIL';
+                        desc = `Evaluated [${escapeHtml(data.question_id || '')}]: ${data.score}/${data.max_score} pts (${st})` +
+                               (data.message ? ` — ${escapeHtml(String(data.message)).substring(0, 80)}` : '');
+                    } else if (etype === 'EXAM_SUBMITTED') {
+                        badgeClass = 'badge-danger';
+                        desc = `Final submission: ${data.total_earned ?? '?'}/${data.total_possible ?? '?'} pts · ${data.percentage ?? '?'}% · ${data.passed ? 'PASSED' : 'FAILED'}`;
+                    } else if (etype === 'CLIPBOARD_COPY') {
+                        desc = `Copied ${data.char_count ?? '?'} chars (${escapeHtml(data.source || 'desktop')})`;
+                    } else if (etype === 'TERMINAL_ATTACH') {
+                        desc = 'Candidate terminal connected';
+                    } else if (etype === 'TERMINAL_DETACH') {
+                        desc = 'Candidate terminal disconnected';
+                    } else if (etype === 'TERMINAL_RESIZE') {
+                        desc = `Terminal resized ${data.cols}x${data.rows}`;
+                    } else if (etype === 'WINDOW_FOCUS') {
+                        desc = `Focused: ${escapeHtml(String(data.title || '')).substring(0, 70)}${data.app ? ` · ${escapeHtml(data.app)}` : ''}`;
+                    } else if (etype === 'BROWSER_NAVIGATE') {
+                        desc = `Visited: ${escapeHtml(String(data.title || data.url || 'Documentation')).substring(0, 60)}`;
+                    } else if (etype === 'BROWSER_SEARCH') {
+                        desc = `Search: "${escapeHtml(data.query || '')}" (${escapeHtml(data.domain || 'web')})`;
+                    } else if (etype === 'SESSION_RESTORED') {
+                        desc = `Session restored by ${escapeHtml(ev.actor || 'admin')}`;
+                    } else if (etype === 'ADMIN_TERMINAL_ATTACH') {
+                        desc = 'Admin attached to candidate terminal';
+                    } else if (etype === 'ADMIN_TERMINAL_DETACH') {
+                        desc = 'Admin detached from candidate terminal';
+                    } else if (etype === 'ADMIN_TERMINAL_INPUT') {
+                        desc = `Admin terminal input (${data.length ?? '?'} chars)`;
+                    } else if (etype === 'ADMIN_SESSION_TERMINATE') {
+                        badgeClass = 'badge-danger';
+                        desc = 'Admin terminated the session';
+                    } else {
+                        desc = escapeHtml(JSON.stringify(data)).substring(0, 140);
+                    }
 
                     return `
                         <div class="timeline-item" onclick="seekReplay(${t})" data-event-idx="${idx}">
@@ -1307,7 +1366,7 @@ function renderReviewSidebar() {
                                 </div>
                             </div>
                             <div style="font-size: 0.78rem; color: #cbd5e1; word-break: break-word;">
-                                ${escapeHtml(JSON.stringify(ev.data || {}))}
+                                ${desc}
                             </div>
                         </div>
                     `;
