@@ -1351,6 +1351,9 @@ function renderReviewSidebar() {
                         desc = `Admin typed: <code style="color:#7dd3fc;">${escapeHtml(data.text || '')}</code>`;
                     } else if (etype === 'TERMINAL_INPUT') {
                         desc = `Candidate typed: <code style="color:#7dd3fc;">${escapeHtml(data.text || '')}</code>`;
+                    } else if (etype === 'DESKTOP_TERMINAL_INPUT') {
+                        const appTag = data.app ? ` · ${escapeHtml(data.app)}` : '';
+                        desc = `Desktop typed: <code style="color:#7dd3fc;">${escapeHtml(data.text || '')}</code>${appTag}`;
                     } else if (etype === 'ADMIN_SESSION_TERMINATE') {
                         badgeClass = 'badge-danger';
                         desc = 'Admin terminated the session';

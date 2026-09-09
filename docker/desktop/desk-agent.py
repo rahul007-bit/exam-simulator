@@ -9,6 +9,7 @@ Runs inside cka-desktop container to provide:
 """
 
 import os
+import re
 import sys
 import time
 import json
@@ -62,6 +63,10 @@ class DeskAgent:
         self._last_seen_prim = ""
         self._last_published = ""
         self._last_window_title = ""
+        self._input_buf = ""
+        self._input_last_ts = 0.0
+        self._input_lock = threading.Lock()
+        self._keymap = {}
 
         signal.signal(signal.SIGINT, self._handle_signal)
         signal.signal(signal.SIGTERM, self._handle_signal)
@@ -88,6 +93,10 @@ class DeskAgent:
 
     def cleanup(self):
         """Removes registration upon container stop."""
+        try:
+            self._flush_desktop_input()
+        except Exception:
+            pass
         try:
             self.r.delete(f"desktop:{self.session_id}")
             self.r.delete(f"desktop:{self.session_id}:alive")
@@ -259,12 +268,237 @@ class DeskAgent:
         t = threading.Thread(target=_poll, daemon=True, name="WindowTelemetry")
         t.start()
 
+    # --- Desktop Keystroke Capture (XInput2) ---
+
+    _KEYSYM_SPECIAL = {
+        "space": " ", "minus": "-", "equal": "=", "bracketleft": "[",
+        "bracketright": "]", "semicolon": ";", "apostrophe": "'",
+        "grave": "`", "backslash": "\\", "comma": ",", "period": ".",
+        "slash": "/", "KP_Decimal": ".", "KP_Add": "+", "KP_Subtract": "-",
+        "KP_Multiply": "*", "KP_Divide": "/",
+        "KP_0": "0", "KP_1": "1", "KP_2": "2", "KP_3": "3", "KP_4": "4",
+        "KP_5": "5", "KP_6": "6", "KP_7": "7", "KP_8": "8", "KP_9": "9",
+    }
+
+    @classmethod
+    def _keysym_to_char(cls, name: str) -> Optional[str]:
+        """Maps an X keysym name to its printable character (None if not printable)."""
+        if not name:
+            return None
+        if name.startswith(("Shift_", "Control_", "Alt_", "Meta_", "Super_",
+                            "Hyper_", "ISO_", "dead_", "XF86")):
+            return None
+        if name in ("Num_Lock", "Caps_Lock", "Scroll_Lock", "Multi_key",
+                    "Mode_switch", "Begin", "KP_Begin", "KP_Separator"):
+            return None
+        if re.fullmatch(r"F\d{1,2}", name):
+            return None
+        if name in cls._KEYSYM_SPECIAL:
+            return cls._KEYSYM_SPECIAL[name]
+        if len(name) == 1 and name.isprintable():
+            return name
+        if name.startswith("U") and len(name) == 6:
+            try:
+                ch = chr(int(name[1:], 16))
+                return ch if ch.isprintable() else None
+            except ValueError:
+                return None
+        return None
+
+    def _refresh_keymap(self):
+        """Caches keycode -> (plain_keysym, shifted_keysym) from xmodmap."""
+        keymap = {}
+        try:
+            out = subprocess.check_output(["xmodmap", "-pke"],
+                                          stderr=subprocess.DEVNULL, timeout=5)
+            for line in out.decode("utf-8", errors="replace").splitlines():
+                m = re.match(r"keycode\s+(\d+)\s+=\s*(.*)", line)
+                if m:
+                    syms = m.group(2).split()
+                    if syms:
+                        keymap[int(m.group(1))] = (syms[0], syms[1] if len(syms) > 1 else syms[0])
+        except Exception:
+            pass
+        self._keymap = keymap
+
+    def _translate_key(self, keycode: int, mods: int):
+        """
+        Translates an XI2 key event to a stroke: a character, '\\t',
+        the FLUSH marker ('\\n'), the BACKSPACE marker ('\\b'),
+        the INTR marker ('^C'), or None (ignore).
+        """
+        entry = self._keymap.get(keycode)
+        if not entry:
+            return None
+        shift = bool(mods & 0x1)
+        lock = bool(mods & 0x2)
+        ctrl = bool(mods & 0x4)
+        plain, shifted = entry[0], entry[1]
+        if ctrl:
+            if shift:
+                # ctrl+shift = terminal copy/paste chord, not typed text
+                return None
+            if plain in ("c", "C"):
+                return "^C"
+            return None
+        if plain in ("Return", "KP_Enter"):
+            return "\n"
+        if plain == "BackSpace":
+            return "\b"
+        if shift or (lock and len(plain) == 1 and plain.isalpha()):
+            name = shifted
+        else:
+            name = plain
+        if name in ("Tab",):
+            return "\t"
+        return self._keysym_to_char(name)
+
+    def _active_window_info(self) -> tuple:
+        """Best-effort (window title, app hint) for the currently focused window."""
+        title, cls = "", ""
+        for args in (("getwindowname",), ("getwindowclassname",)):
+            try:
+                out = subprocess.check_output(
+                    ["xdotool", "getactivewindow", args[0]],
+                    stderr=subprocess.DEVNULL, timeout=1.0)
+                val = out.decode("utf-8", errors="replace").strip()
+                if args[0] == "getwindowname":
+                    title = val
+                else:
+                    cls = val
+            except Exception:
+                pass
+        low = f"{cls} {title}".lower()
+        if "terminal" in low or "xterm" in low or "console" in low:
+            app = "terminal"
+        elif "firefox" in low or "mozilla" in low:
+            app = "browser"
+        else:
+            app = "desktop"
+        return (title or self._last_window_title or "unknown", app)
+
+    def _publish_desktop_input(self, text: str):
+        """Publishes an aggregated typed line to the session event channel."""
+        if not text:
+            return
+        title, app = self._active_window_info()
+        payload = {
+            "event": "DESKTOP_TERMINAL_INPUT",
+            "text": text,
+            "window": title,
+            "app": app,
+            "timestamp": time.time(),
+        }
+        try:
+            self.r.publish(f"events:{self.session_id}", json.dumps(payload))
+        except Exception:
+            pass
+
+    def _flush_desktop_input(self, force: bool = False):
+        with self._input_lock:
+            text = self._input_buf
+            self._input_buf = ""
+        if text or force:
+            self._publish_desktop_input(text)
+
+    def _handle_desktop_key(self, stroke: str):
+        with self._input_lock:
+            if stroke == "\n":
+                text = self._input_buf
+                self._input_buf = ""
+                self._input_last_ts = time.time()
+            elif stroke == "\b":
+                self._input_buf = self._input_buf[:-1]
+                self._input_last_ts = time.time()
+                return
+            elif stroke == "^C":
+                text = (self._input_buf + "^C") if self._input_buf else "^C"
+                self._input_buf = ""
+                self._input_last_ts = time.time()
+            else:
+                self._input_buf += stroke
+                self._input_last_ts = time.time()
+                if len(self._input_buf) >= 200:
+                    text = self._input_buf
+                    self._input_buf = ""
+                else:
+                    return
+        self._publish_desktop_input(text)
+
+    def _key_input_loop(self):
+        """
+        Aggregates desktop keystrokes (XInput2 events on the root window) into
+        whole typed lines and publishes DESKTOP_TERMINAL_INPUT events, mirroring
+        the web-terminal TERMINAL_INPUT capture. Strokes are attributed to the
+        focused window at flush time.
+        """
+        if not self._keymap:
+            self._refresh_keymap()
+        proc = None
+        try:
+            proc = subprocess.Popen(["xinput", "test-xi2", "--root"],
+                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                    text=True, bufsize=1)
+            self._last_window_title = self._active_window_info()[0]
+            in_keypress = False
+            keycode = None
+            mods = 0
+            for line in proc.stdout:
+                line = line.rstrip("\n")
+                if line.startswith("EVENT type"):
+                    in_keypress = "(KeyPress)" in line
+                    if in_keypress:
+                        keycode, mods = None, 0
+                    continue
+                if not in_keypress:
+                    continue
+                m = re.search(r"detail:\s+(\d+)", line)
+                if m:
+                    keycode = int(m.group(1))
+                    continue
+                m = re.search(r"modifiers:.*base\s+(\S+)", line)
+                if m and keycode is not None:
+                    raw = m.group(1)
+                    try:
+                        mods = int(raw, 16) if raw.startswith("0x") else int(raw)
+                    except ValueError:
+                        mods = 0
+                    stroke = self._translate_key(keycode, mods)
+                    keycode = None
+                    if stroke is not None:
+                        self._handle_desktop_key(stroke)
+        except Exception:
+            pass
+        finally:
+            if proc:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+            self._flush_desktop_input()
+
+    def start_key_input_monitor(self):
+        if not self._keymap:
+            self._refresh_keymap()
+        t = threading.Thread(target=self._key_input_loop, daemon=True, name="KeyInput")
+        t.start()
+
     # --- Heartbeat Loop ---
 
     def run_heartbeat_loop(self):
         while self.running:
             try:
                 self.r.set(f"desktop:{self.session_id}:alive", "1", ex=25)
+            except Exception:
+                pass
+            try:
+                with self._input_lock:
+                    stale = self._input_buf and (time.time() - self._input_last_ts) > 10.0
+                    if stale:
+                        text = self._input_buf
+                        self._input_buf = ""
+                if stale:
+                    self._publish_desktop_input(text)
             except Exception:
                 pass
             time.sleep(10.0)
@@ -285,6 +519,7 @@ def main():
     agent.start_inbound_clipboard_listener()
     agent.start_outbound_clipboard_poller()
     agent.start_window_telemetry_poller()
+    agent.start_key_input_monitor()
 
     print("[DeskAgent] Desktop agent running successfully.")
     agent.run_heartbeat_loop()

@@ -4,9 +4,11 @@ Uses native Incus Remotes (TLS on port 8443) and local system containers
 to provision, bootstrap, and tear down resource-capped Kubernetes nodes.
 """
 import os
+import re
 import time
 import json
 import shutil
+import ipaddress
 import subprocess
 import concurrent.futures
 from pathlib import Path
@@ -98,6 +100,112 @@ class IncusClusterManager:
         remotes = self.discover_compute_remotes()
         return remote_name in remotes
 
+    # ------------------------------------------------------------------
+    # Fleet route mesh (cross-host kubeadm join + remote node access)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _remote_lan_ip(remote_name: str) -> Optional[str]:
+        """LAN address of a remote incus host, parsed from its remote URL."""
+        try:
+            res = subprocess.run(["incus", "remote", "list", "--format", "json"],
+                                 capture_output=True, text=True, timeout=8)
+            if res.returncode == 0 and res.stdout.strip():
+                data = json.loads(res.stdout.strip())
+                info = data.get(remote_name) or {}
+                url = info.get("Addr") or info.get("addr") or ""
+                m = re.search(r"https://([0-9.]+):\d+", url)
+                if m:
+                    return m.group(1)
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def _ssh_host_cmd(host_ip: str, cmd: str) -> List[str]:
+        return ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=6",
+                "-o", "StrictHostKeyChecking=no", f"root@{host_ip}", cmd]
+
+    def _sync_fleet_routes(self, remotes_map: Dict[str, Optional[str]]) -> None:
+        """
+        Ensures every fleet host (including this engine host) has a route to
+        every other host's incus bridge subnet. Without this, cross-host
+        kubeadm join and desktop/grader access to remote nodes fail, because
+        each host's incusbr0 uses an independent 10.x.y.0/24 bridge subnet.
+        Re-applied idempotently (`ip route replace`) at every provisioning so
+        rebooted hosts self-heal.
+        """
+        # 1. Collect fleet hosts: (tag, lan_ip, bridge_subnet, is_local)
+        @staticmethod
+        def _subnet_of(addr_output: str) -> Optional[str]:
+            """Extracts the bridge network (e.g. 10.110.46.0/24) from ip addr output."""
+            m = re.search(r"inet (\d+\.\d+\.\d+\.\d+)/(\d+)", addr_output)
+            if m:
+                try:
+                    return str(ipaddress.ip_network(f"{m.group(1)}/{m.group(2)}", strict=False))
+                except ValueError:
+                    return None
+            return None
+
+        local_subnet = None
+        try:
+            res = subprocess.run(["ip", "-4", "-o", "addr", "show", "dev", "incusbr0"],
+                                 capture_output=True, text=True, timeout=8)
+            local_subnet = _subnet_of(res.stdout)
+        except Exception:
+            pass
+
+        local_ip = None
+        remote_hosts: List[Tuple[str, Optional[str], Optional[str]]] = []
+        for _, rem in sorted(remotes_map.items()):
+            if not rem:
+                continue
+            rip = self._remote_lan_ip(rem)
+            rsubnet = None
+            if rip:
+                if local_ip is None:
+                    try:
+                        res = subprocess.run(["ip", "route", "get", rip],
+                                             capture_output=True, text=True, timeout=8)
+                        m = re.search(r"src (\d+\.\d+\.\d+\.\d+)", res.stdout)
+                        if m:
+                            local_ip = m.group(1)
+                    except Exception:
+                        pass
+                try:
+                    res = subprocess.run(self._ssh_host_cmd(rip, "ip -4 -o addr show dev incusbr0"),
+                                         capture_output=True, text=True, timeout=15)
+                    rsubnet = _subnet_of(res.stdout)
+                except Exception:
+                    pass
+            remote_hosts.append((rem, rip, rsubnet))
+
+        hosts: List[Tuple[str, Optional[str], Optional[str], bool]] = [("local", local_ip, local_subnet, True)]
+        hosts.extend([(t, ip, s, False) for (t, ip, s) in remote_hosts])
+        hosts = [h for h in hosts if h[2]]
+        if len(hosts) < 2:
+            print("[IncusManager] Fleet route mesh: fewer than 2 usable hosts, skipping.", flush=True)
+            return
+
+        def _run_on(host, args):
+            if host[3]:
+                return subprocess.run(args, capture_output=True, text=True, timeout=15)
+            return subprocess.run(self._ssh_host_cmd(host[1], " ".join(args)),
+                                  capture_output=True, text=True, timeout=20)
+
+        # 2. Full mesh: each host gets a route to every other host's subnet
+        failures = 0
+        for a in hosts:
+            for b in hosts:
+                if a is b or a[2] == b[2] or not b[1]:
+                    continue
+                res = _run_on(a, ["ip", "route", "replace", b[2], "via", b[1]])
+                if res.returncode != 0:
+                    failures += 1
+                    print(f"[IncusManager] Route mesh: failed adding {b[2]} via {b[1]} on {a[0]}: {(res.stderr or '').strip()[:120]}", flush=True)
+        print(f"[IncusManager] Fleet route mesh synced across {len(hosts)} hosts ({failures} failures).", flush=True)
+
+
     def get_target_distribution(
         self,
         roles: List[str],
@@ -116,13 +224,11 @@ class IncusClusterManager:
             return {r: None for r in roles}
 
         distribution: Dict[str, Optional[str]] = {}
-        # Control plane (first role) stays on the engine host: the kubeconfig is
-        # consumed by host kubectl and the desktop container, which reliably reach
-        # only the local bridge. Workers are distributed across remotes round-robin.
-        distribution[roles[0]] = None
-        for i, role in enumerate(roles[1:]):
-            rem_idx = i % len(remotes)
-            distribution[role] = remotes[rem_idx]
+        # Round-robin every role (control plane included) across the fleet hosts
+        # so all nodes share the load; with N hosts >= len(roles) each host gets
+        # at most one node per session.
+        for i, role in enumerate(roles):
+            distribution[role] = remotes[i % len(remotes)]
 
         return distribution
 
@@ -332,6 +438,14 @@ class IncusClusterManager:
             roles = ["node1", "node2", "node3"]
 
         remotes = custom_remotes or self.get_target_distribution(roles, is_distributed=is_distributed)
+
+        # Cross-host routing: workers must reach the control plane's bridge
+        # subnet over the hosts' LAN before kubeadm join can succeed.
+        try:
+            self._sync_fleet_routes(remotes)
+        except Exception as ex:
+            print(f"[IncusManager] Warning: fleet route sync failed: {ex}")
+
         limits = {
             "node1": ("2", "2GiB"),
             "node2": ("2", "1536MiB"),
@@ -477,9 +591,30 @@ if [ ! -f /etc/kubernetes/admin.conf ]; then
     systemctl restart kubelet 2>/dev/null || true
 fi
 
+# Root kubectl: make admin.conf the default kubeconfig so candidates can run
+# kubectl immediately after `ssh node1` (interactive and non-interactive alike).
+mkdir -p /root/.kube
+cp -f /etc/kubernetes/admin.conf /root/.kube/config 2>/dev/null || true
+chmod 600 /root/.kube/config 2>/dev/null || true
+printf 'export KUBECONFIG=/etc/kubernetes/admin.conf\n' > /etc/profile.d/cka-kubeconfig.sh 2>/dev/null || true
+
 # Remove master/control-plane taints to allow scheduling
-kubectl taint nodes --all node-role.kubernetes.io/control-plane- 2>/dev/null || true
-kubectl taint nodes --all node-role.kubernetes.io/master- 2>/dev/null || true
+KC="--kubeconfig=/etc/kubernetes/admin.conf"
+kubectl $KC taint nodes --all node-role.kubernetes.io/control-plane- 2>/dev/null || true
+kubectl $KC taint nodes --all node-role.kubernetes.io/master- 2>/dev/null || true
+
+# Containers cannot write net.netfilter sysctls on modern kernels (EACCES even
+# as root with /proc/sys remounted rw), so kube-proxy must be told to leave the
+# conntrack limits as-is or it CrashLoops with:
+#   "open /proc/sys/net/netfilter/nf_conntrack_max: permission denied"
+# maxPerCore=0 / timeouts 0s => kube-proxy skips every net.netfilter write.
+if kubectl $KC -n kube-system get cm kube-proxy >/dev/null 2>&1; then
+    kubectl $KC -n kube-system get cm kube-proxy -o jsonpath='{{.data.config\\.conf}}' > /tmp/kp.conf 2>/dev/null || true
+    sed -i 's/^  maxPerCore:.*/  maxPerCore: 0/; s/^  min:.*/  min: 0/; s/^  tcpEstablishedTimeout:.*/  tcpEstablishedTimeout: 0s/; s/^  tcpCloseWaitTimeout:.*/  tcpCloseWaitTimeout: 0s/' /tmp/kp.conf
+    kubectl $KC -n kube-system create configmap kube-proxy --from-file=config.conf=/tmp/kp.conf --dry-run=client -o yaml | kubectl $KC apply -f -
+    kubectl $KC -n kube-system rollout restart ds/kube-proxy 2>/dev/null || true
+    rm -f /tmp/kp.conf
+fi
 
 if [ ! -f /usr/local/bin/etcdctl ]; then
     etcdctl_bin=$(find /var/lib/containerd -name etcdctl 2>/dev/null | head -n1)
@@ -536,7 +671,7 @@ fi
 """
             try:
                 print(f"[IncusManager] Joining worker {w_target} to cluster in parallel...", flush=True)
-                self._run_incus(["exec", w_target, "--", "bash"], input=w_setup, text=True, timeout=90)
+                self._run_incus(["exec", w_target, "--", "bash"], input=w_setup, text=True, timeout=150)
                 self._run_incus(
                     ["exec", node1_target, "--", "kubectl", "label", "node", f"{w_role}-{session_id}", "node-role.kubernetes.io/worker=worker", "--overwrite", "--kubeconfig=/etc/kubernetes/admin.conf"],
                     timeout=10

@@ -19,7 +19,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     firefox-esr \
     xclip \
     xdotool \
+    xinput \
     x11-utils \
+    x11-xserver-utils \
     python3 \
     python3-redis \
     procps \
