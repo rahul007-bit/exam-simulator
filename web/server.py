@@ -861,9 +861,11 @@ def action_submit():
 
     try:
         if session and session.session_id:
-            orchestrator.teardown_session(session.session_id)
+            # Archive FIRST: it snapshots the session state blob (name,
+            # created_at, candidate_token, total_tasks) for the admin history
+            # list — teardown deletes that blob, so archiving after teardown
+            # produced "Unknown" rows with no creation date.
             redis_bus.archive_session(
-
                 session.session_id,
                 status="completed",
                 scorecard={
@@ -873,6 +875,7 @@ def action_submit():
                     "passed": passed,
                 },
             )
+            orchestrator.teardown_session(session.session_id)
             deployer.clear_active_session()
     except Exception:
         pass
@@ -1007,8 +1010,8 @@ def start_exam(req: StartRequest, request: Request):
     # Archive any currently active session before starting a new one
     if old_session and old_session.session_id:
         try:
-            orchestrator.teardown_session(old_session.session_id)
             redis_bus.archive_session(old_session.session_id, status="replaced")
+            orchestrator.teardown_session(old_session.session_id)
         except Exception:
             pass
 
@@ -1202,11 +1205,8 @@ def reset_exam(request: Request):
             recorder.log_event("EXAM_RESET", {"actor": actor}, actor=actor)
         except Exception:
             pass
+        redis_bus.archive_session(active_session.session_id, status="reset")
         orchestrator.teardown_session(active_session.session_id)
-        try:
-            redis_bus.archive_session(active_session.session_id, status="reset")
-        except Exception:
-            pass
     deployer.clear_session(cleanup_cluster=True)
     return {"status": "ok", "message": "Exam session cleared and cluster cleaned"}
 
@@ -1522,11 +1522,10 @@ def admin_terminate_session(identifier: str, request: Request):
         except Exception:
             pass
 
+    redis_bus.archive_session(actual_session_id, status="terminated")
     orchestrator.teardown_session(actual_session_id)
     if actual_session_id != identifier:
         orchestrator.teardown_session(identifier)
-
-    redis_bus.archive_session(actual_session_id, status="terminated")
 
     active_s = deployer.load_active_session(loader)
     if active_s and (active_s.session_id == actual_session_id or active_s.session_id == identifier):
@@ -1569,11 +1568,10 @@ def admin_reset_session(identifier: str, request: Request):
         except Exception:
             pass
 
+    redis_bus.archive_session(actual_session_id, status="reset")
     orchestrator.teardown_session(actual_session_id)
     if actual_session_id != identifier:
         orchestrator.teardown_session(identifier)
-
-    redis_bus.archive_session(actual_session_id, status="reset")
 
     active_s = deployer.load_active_session(loader)
     if active_s and (active_s.session_id == actual_session_id or active_s.session_id == identifier):
@@ -1598,8 +1596,8 @@ def admin_end_session(identifier: str, request: Request):
     if active_s and active_s.session_id == identifier:
         scorecard = action_submit()
     else:
-        orchestrator.teardown_session(identifier)
         redis_bus.archive_session(identifier, status="submitted")
+        orchestrator.teardown_session(identifier)
         deployer.clear_active_session()
 
 
@@ -1862,6 +1860,7 @@ async def terminal_websocket(websocket: WebSocket, session_id: Optional[str] = N
 
 
         try:
+            recorder.flush_input_buffer(actor)
             recorder.log_event("ADMIN_TERMINAL_DETACH" if is_admin else "TERMINAL_DETACH", {"session_id": sid, "actor": actor}, actor=actor)
         except Exception:
             pass
@@ -2286,8 +2285,8 @@ async def _idle_session_reaper():
                 await asyncio.sleep(2)  # Give WS clients time to receive the event
                 loop = asyncio.get_running_loop()
                 await loop.run_in_executor(None, lambda: (
-                    orchestrator.teardown_session(session.session_id),
                     redis_bus.archive_session(session.session_id, status="idle_timeout"),
+                    orchestrator.teardown_session(session.session_id),
                     deployer.clear_session(cleanup_cluster=True),
                 ))
         except Exception as e:
@@ -2322,8 +2321,8 @@ async def _session_expiry_enforcer():
                 # Archive as expired (not graded since we don't have full grading context async)
                 loop = asyncio.get_running_loop()
                 await loop.run_in_executor(None, lambda: (
-                    orchestrator.teardown_session(session.session_id),
                     redis_bus.archive_session(session.session_id, status="expired"),
+                    orchestrator.teardown_session(session.session_id),
                     deployer.clear_session(cleanup_cluster=True),
                 ))
         except Exception as e:

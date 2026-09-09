@@ -180,13 +180,15 @@ class SandboxOrchestrator:
                     pass
                 client = redis_bus.get_sync_client()
                 if client:
+                    # NOTE: history:{sid} is NOT deleted here — archive_session
+                    # owns it (history must survive teardown for the admin
+                    # sessions list).
                     for key in [
                         f"session:{session_id}:kubeconfig",
                         f"session:{session_id}:desktop",
                         f"session:{session_id}:state",
                         f"session:{session_id}",
                         f"token:{session_id}",
-                        f"history:{session_id}",
                     ]:
                         client.delete(key)
                     if clean_id:
@@ -196,7 +198,6 @@ class SandboxOrchestrator:
                             f"session:{clean_id}:state",
                             f"session:{clean_id}",
                             f"token:{clean_id}",
-                            f"history:{clean_id}",
                         ]:
                             client.delete(key)
         except Exception as e:

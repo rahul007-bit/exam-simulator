@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import time
+import re
 import threading
 import subprocess
 import shutil
@@ -40,6 +41,7 @@ class SessionRecorder:
         self._browser_thread: Optional[threading.Thread] = None
         self._browser_stop_event = threading.Event()
         self._last_browser_ts = 0
+        self._input_buf: Dict[str, str] = {}
 
     @property
     def is_active(self) -> bool:
@@ -208,6 +210,62 @@ class SessionRecorder:
                 except Exception:
                     pass
 
+    # --- Timeline-visible typed lines (aggregated keystrokes) ---
+
+    _INPUT_MAX_LINE = 200
+
+    @staticmethod
+    def _sanitize_input(s: str) -> str:
+        """Strips ANSI escape/CSI sequences so arrow keys & colors don't pollute lines."""
+        return re.sub(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b.", "", s)
+
+    def _process_input_for_events(self, actor: str, data_str: str) -> None:
+        """Aggregates raw keystrokes into whole typed lines for the event timeline.
+
+        Keeps a partial line buffered until Enter (or Ctrl-C/D) arrives, so the
+        admin timeline shows 'kubectl get nodes' instead of one event per
+        keystroke. Raw keystrokes remain in the .cast 'i' frames as before.
+        """
+        with self._lock:
+            buf = self._input_buf.get(actor, "") + data_str
+        buf = self._sanitize_input(buf)
+
+        out = []
+        for ch in buf:
+            if ch in ("\x7f", "\b"):
+                if out:
+                    out.pop()
+            else:
+                out.append(ch)
+        line = "".join(out)
+        line = line.replace("\x03", "\r^C").replace("\x04", "\r^D")
+
+        chunks = re.split(r"[\r\n]+", line)
+        with self._lock:
+            self._input_buf[actor] = chunks.pop()[-400:]
+        for chunk in chunks:
+            self._log_input_line(actor, chunk)
+
+    def _log_input_line(self, actor: str, text: str) -> None:
+        if not self._active or not text or not text.strip():
+            return
+        text = text[: self._INPUT_MAX_LINE]
+        event = "ADMIN_TERMINAL_INPUT" if actor == "admin" else "TERMINAL_INPUT"
+        self.log_event(event, {
+            "actor": actor,
+            "text": text,
+            "length": len(text),
+            "preview": text[:50],
+        }, actor=actor)
+
+    def flush_input_buffer(self, actor: Optional[str] = None) -> None:
+        """Flushes any partial typed line as an event (on detach or session end)."""
+        targets = [actor] if actor else list(self._input_buf.keys())
+        for a in targets:
+            with self._lock:
+                buf = self._input_buf.pop(a, "")
+            self._log_input_line(a, buf)
+
     def record_input(self, data: Union[str, bytes], actor: str = "candidate") -> None:
         """Records terminal keystrokes / input with actor tagging."""
         if not self._active or not self._cast_fp:
@@ -231,12 +289,7 @@ class SessionRecorder:
                 except Exception:
                     pass
 
-        if actor == "admin":
-            self.log_event("ADMIN_TERMINAL_INPUT", {
-                "actor": "admin",
-                "length": len(data_str),
-                "preview": data_str[:50],
-            }, actor="admin")
+        self._process_input_for_events(actor, data_str)
 
     def record_resize(self, cols: int, rows: int) -> None:
         """Records terminal resize event."""
@@ -322,6 +375,10 @@ class SessionRecorder:
 
         # Stop browser tracker and flush final visits
         self._stop_browser_tracker()
+
+        # Flush any partial typed lines so preceding commands appear in the
+        # timeline before the submission marker.
+        self.flush_input_buffer()
 
         self.log_event("EXAM_SUBMITTED", {
             "total_earned": total_earned,

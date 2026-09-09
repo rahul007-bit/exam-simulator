@@ -1348,7 +1348,9 @@ function renderReviewSidebar() {
                     } else if (etype === 'ADMIN_TERMINAL_DETACH') {
                         desc = 'Admin detached from candidate terminal';
                     } else if (etype === 'ADMIN_TERMINAL_INPUT') {
-                        desc = `Admin terminal input (${data.length ?? '?'} chars)`;
+                        desc = `Admin typed: <code style="color:#7dd3fc;">${escapeHtml(data.text || '')}</code>`;
+                    } else if (etype === 'TERMINAL_INPUT') {
+                        desc = `Candidate typed: <code style="color:#7dd3fc;">${escapeHtml(data.text || '')}</code>`;
                     } else if (etype === 'ADMIN_SESSION_TERMINATE') {
                         badgeClass = 'badge-danger';
                         desc = 'Admin terminated the session';
