@@ -394,6 +394,10 @@ if [ -f "${APP_DIR}/requirements.txt" ]; then
 fi
 "${APP_DIR}/.venv/bin/pip" install uvicorn fastapi pyyaml -q
 
+# Ensure web scripts are executable (build-frontend.sh is invoked directly by
+# start-web.sh; the systemd unit calls it via /bin/bash).
+chmod +x "${APP_DIR}/tools/build-frontend.sh" "${APP_DIR}/tools/start-web.sh" 2>/dev/null || true
+
 # ------------------------------------------------------------------------------
 # 9. Systemd Services Deployment
 # ------------------------------------------------------------------------------
@@ -452,6 +456,7 @@ Environment=EXAM_ADMIN=0
 Environment=VNC_DISPLAY=:1
 Environment=XAUTHORITY=/home/exam/.Xauthority
 Environment=EXAM_HOME=/home/exam
+ExecStartPre=/bin/bash ${APP_DIR}/tools/build-frontend.sh
 ExecStart=${APP_DIR}/.venv/bin/uvicorn web.server:app --host 0.0.0.0 --port 3000
 Restart=always
 RestartSec=3

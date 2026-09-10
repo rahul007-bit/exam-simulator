@@ -526,19 +526,40 @@ class SessionRecorder:
                 pass
 
     def _find_places_db(self, candidate_user: str = "exam") -> Optional[Path]:
-        """Discovers active Firefox places.sqlite profile database."""
-        possible_dirs = [
-            Path(f"/home/{candidate_user}/.config/mozilla/firefox"),
-            Path(f"/home/{candidate_user}/.mozilla/firefox"),
-            Path.home() / ".config/mozilla/firefox",
-            Path.home() / ".mozilla/firefox",
-        ]
-        for pdir in possible_dirs:
+        """Discovers active Firefox places.sqlite profile database.
+
+        Covers the common Linux install layouts: distro package (~/.mozilla),
+        XDG (~/.config/mozilla), Snap and Flatpak. An explicit override may be
+        supplied via the ``FIREFOX_PROFILE_DIR`` env var.
+        """
+        override = os.getenv("FIREFOX_PROFILE_DIR")
+        roots = []
+        if override:
+            roots.append(Path(override))
+        roots.extend(
+            [
+                Path(f"/home/{candidate_user}/.mozilla/firefox"),
+                Path(f"/home/{candidate_user}/.config/mozilla/firefox"),
+                Path(f"/home/{candidate_user}/snap/firefox/common/.mozilla/firefox"),
+                Path(f"/home/{candidate_user}/.var/app/org.mozilla.firefox/.mozilla/firefox"),
+                Path.home() / ".mozilla/firefox",
+                Path.home() / ".config/mozilla/firefox",
+                Path.home() / "snap/firefox/common/.mozilla/firefox",
+                Path.home() / ".var/app/org.mozilla.firefox/.mozilla/firefox",
+            ]
+        )
+
+        # Prefer the profile whose places.sqlite was touched most recently.
+        candidates: list[Path] = []
+        for pdir in roots:
             if pdir.exists():
-                for p in pdir.glob("*/places.sqlite"):
-                    if p.is_file():
-                        return p
-        return None
+                candidates.extend(p for p in pdir.glob("*/places.sqlite") if p.is_file())
+        if not candidates:
+            return None
+        try:
+            return max(candidates, key=lambda p: p.stat().st_mtime)
+        except OSError:
+            return candidates[0]
 
     def _check_browser_history(self, candidate_user: str = "exam") -> None:
         """Snapshots Firefox places.sqlite and logs new visits/searches into session events."""
@@ -547,6 +568,13 @@ class SessionRecorder:
 
         places_path = self._find_places_db(candidate_user)
         if not places_path or not places_path.exists():
+            if os.getenv("RECORDER_DEBUG") and not getattr(self, "_browser_db_warned", False):
+                self._browser_db_warned = True
+                print(
+                    f"[Recorder] Firefox places.sqlite not found for user "
+                    f"'{candidate_user}' (set FIREFOX_PROFILE_DIR to override)",
+                    flush=True,
+                )
             return
 
         tmp_id = f"places_snap_{os.getpid()}_{threading.get_ident()}"

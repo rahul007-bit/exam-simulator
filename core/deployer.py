@@ -36,13 +36,19 @@ class LabDeployer:
                     data = json.load(f)
             except Exception as e:
                 print(f"[Warning] Failed to parse active session: {e}")
-                return None
+        if not data:
+            return None
+
+        # Do not return completed or archived sessions as active
+        if data.get("status") in ("completed", "submitted", "terminated", "replaced"):
+            return None
 
         try:
             q_ids = data.get("question_ids", [])
             questions = [loader.get(qid) for qid in q_ids if loader.get(qid) is not None]
             return ExamSession(
                 session_id=data.get("session_id", "default"),
+
                 created_at=data.get("created_at", ""),
                 name=data.get("name", "Active Practice Session"),
                 questions=questions,
@@ -70,6 +76,14 @@ class LabDeployer:
             pass
         with open(self.session_file, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
+
+    def clear_active_session(self) -> None:
+        try:
+            if self.session_file.exists():
+                self.session_file.unlink(missing_ok=True)
+        except Exception:
+            pass
+
 
     def export_tasks_markdown(self, session: ExamSession) -> Path:
         """Exports the active exam questions as a clean Markdown task sheet in sets/."""
@@ -439,7 +453,12 @@ class LabDeployer:
         except Exception:
             pass
         self.export_tasks_markdown(session)
-        self.deploy_step(session, 0)
+        try:
+            res = subprocess.run(["kubectl", "config", "get-contexts", "-o", "name"], capture_output=True, text=True, timeout=2)
+            if "k3d-cka" in res.stdout.splitlines():
+                self.deploy_step(session, 0)
+        except Exception:
+            pass
         return session
 
     def deploy_step(self, session: ExamSession, index: int, force_setup: bool = False, progress_cb: Optional[Any] = None) -> bool:
@@ -619,7 +638,7 @@ class LabDeployer:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
-                    timeout=15,
+                    timeout=35,
                 )
                 if res.returncode == 0:
                     print(" [OK]")

@@ -4,12 +4,15 @@ Lightweight Redis-Driven Desktop Sidecar Agent
 Runs inside cka-desktop container to provide:
 1. Dynamic Registration: Registers container IP and ports in Redis.
 2. Bidirectional Clipboard Sync: Subscribes to clipboard:{session_id} and publishes local X11 copies.
-3. Documentation/Activity Telemetry: Emits active window and browser title changes to events:{session_id}.
+3. Documentation/Activity Telemetry: Emits active window and Firefox history
+   (browser navigation/search) events to events:{session_id}.
 4. Heartbeat: Keeps desktop:{session_id}:alive key refreshed.
 """
 
 import os
 import re
+import shutil
+import sqlite3
 import sys
 import time
 import json
@@ -17,6 +20,8 @@ import signal
 import socket
 import subprocess
 import threading
+import urllib.parse
+from pathlib import Path
 from typing import Optional
 
 try:
@@ -67,6 +72,7 @@ class DeskAgent:
         self._input_last_ts = 0.0
         self._input_lock = threading.Lock()
         self._keymap = {}
+        self._last_browser_ts = int(time.time() * 1_000_000)
 
         signal.signal(signal.SIGINT, self._handle_signal)
         signal.signal(signal.SIGTERM, self._handle_signal)
@@ -254,18 +260,129 @@ class DeskAgent:
                     if out and out != self._last_window_title:
                         self._last_window_title = out
                         app_hint = "browser" if "firefox" in out.lower() or "mozilla" in out.lower() else "desktop"
-                        event_payload = {
-                            "event": "WINDOW_FOCUS",
-                            "title": out,
-                            "app": app_hint,
-                            "timestamp": time.time(),
-                        }
-                        self.r.publish(f"events:{self.session_id}", json.dumps(event_payload))
+                        # Browser activity is covered by the dedicated Firefox
+                        # history poller (BROWSER_NAVIGATE / BROWSER_SEARCH), so
+                        # skip browser window-focus events to avoid duplicates.
+                        if app_hint != "browser":
+                            event_payload = {
+                                "event": "WINDOW_FOCUS",
+                                "title": out,
+                                "app": app_hint,
+                                "timestamp": time.time(),
+                            }
+                            self.r.publish(f"events:{self.session_id}", json.dumps(event_payload))
                 except Exception:
                     pass
                 time.sleep(3.0)
 
         t = threading.Thread(target=_poll, daemon=True, name="WindowTelemetry")
+        t.start()
+
+    # --- Browser History Telemetry (Firefox places.sqlite inside the container) ---
+
+    def _find_firefox_places(self) -> Optional[Path]:
+        """Locate the container-local Firefox places.sqlite (most recently used)."""
+        home = Path.home()
+        roots = [
+            Path("/home/exam/.mozilla/firefox"),
+            Path("/home/exam/.config/mozilla/firefox"),
+            Path("/home/exam/snap/firefox/common/.mozilla/firefox"),
+            home / ".mozilla/firefox",
+            home / ".config/mozilla/firefox",
+            home / "snap/firefox/common/.mozilla/firefox",
+        ]
+        candidates = []
+        for root in roots:
+            if root.exists():
+                candidates.extend(p for p in root.glob("*/places.sqlite") if p.is_file())
+        if not candidates:
+            return None
+        try:
+            return max(candidates, key=lambda p: p.stat().st_mtime)
+        except OSError:
+            return candidates[0]
+
+    def _check_browser_history(self) -> None:
+        """Publishes new Firefox visits/searches to events:{session_id}."""
+        places_path = self._find_firefox_places()
+        if not places_path or not places_path.exists():
+            return
+
+        tmp_db = Path(f"/tmp/places_snap_{os.getpid()}_{threading.get_ident()}.sqlite")
+        try:
+            shutil.copy2(places_path, tmp_db)
+            wal = places_path.with_name(places_path.name + "-wal")
+            if wal.exists():
+                shutil.copy2(wal, Path(f"{tmp_db}-wal"))
+
+            conn = sqlite3.connect(f"file:{tmp_db}?mode=ro", uri=True, timeout=2.0)
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT url, title, last_visit_date FROM moz_places "
+                "WHERE last_visit_date > ? ORDER BY last_visit_date ASC",
+                (self._last_browser_ts,),
+            )
+            rows = cursor.fetchall()
+            conn.close()
+
+            for url, title, visit_ts in rows:
+                if visit_ts and visit_ts > self._last_browser_ts:
+                    self._last_browser_ts = visit_ts
+                if not url or url.startswith(("about:", "chrome:", "blob:", "data:")):
+                    continue
+
+                parsed = urllib.parse.urlparse(url)
+                domain = parsed.netloc.lower()
+                query_str = None
+                if (
+                    "google." in domain or "duckduckgo." in domain or "bing." in domain
+                ) and "/search" in parsed.path:
+                    query_str = urllib.parse.parse_qs(parsed.query).get("q", [None])[0]
+                elif "kubernetes.io" in domain and "/search" in parsed.path:
+                    query_str = urllib.parse.parse_qs(parsed.query).get("q", [None])[0]
+
+                if query_str:
+                    payload = {
+                        "event": "BROWSER_SEARCH",
+                        "query": query_str,
+                        "url": url,
+                        "domain": domain,
+                        "title": title or f"Search: {query_str}",
+                        "timestamp": time.time(),
+                    }
+                else:
+                    payload = {
+                        "event": "BROWSER_NAVIGATE",
+                        "url": url,
+                        "title": title or domain,
+                        "domain": domain,
+                        "timestamp": time.time(),
+                    }
+                self.r.publish(f"events:{self.session_id}", json.dumps(payload))
+        except Exception:
+            pass
+        finally:
+            for suffix in ["", "-wal", "-shm"]:
+                p = Path(f"{tmp_db}{suffix}")
+                if p.exists():
+                    try:
+                        p.unlink()
+                    except Exception:
+                        pass
+
+    def start_browser_history_poller(self):
+        """Polls the local Firefox history and publishes browser events."""
+        self._last_browser_ts = int(time.time() * 1_000_000)
+
+        def _poll():
+            while self.running:
+                try:
+                    self._check_browser_history()
+                except Exception:
+                    pass
+                time.sleep(3.0)
+
+        t = threading.Thread(target=_poll, daemon=True, name="BrowserHistory")
         t.start()
 
     # --- Desktop Keystroke Capture (XInput2) ---
@@ -519,6 +636,7 @@ def main():
     agent.start_inbound_clipboard_listener()
     agent.start_outbound_clipboard_poller()
     agent.start_window_telemetry_poller()
+    agent.start_browser_history_poller()
     agent.start_key_input_monitor()
 
     print("[DeskAgent] Desktop agent running successfully.")

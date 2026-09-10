@@ -1,4 +1,4 @@
-﻿"""
+"""
 Ephemeral k3d Cluster Manager
 Provisions, resource-caps, and destroys isolated k3s clusters per candidate exam session.
 """
@@ -126,14 +126,48 @@ class K3dClusterManager:
         if not self.is_available():
             return True
 
+        clean_id = session_id.replace("session-", "").replace("-", "")[:10]
         kname = self._cluster_name(session_id)
+        target_clusters = {kname, f"cka-{session_id}", f"cka-{clean_id}"}
+
+        # Scan live k3d clusters
         try:
-            res = subprocess.run(["k3d", "cluster", "delete", kname], capture_output=True, text=True, timeout=30)
-            print(f"[K3dManager] Deleted ephemeral cluster '{kname}'.")
-            return res.returncode == 0
+            res = subprocess.run(["k3d", "cluster", "list", "--no-headers"], capture_output=True, text=True, timeout=10)
+            if res.returncode == 0 and res.stdout.strip():
+                for line in res.stdout.strip().splitlines():
+                    parts = line.split()
+                    if parts:
+                        cl_name = parts[0]
+                        if cl_name.startswith("cka-") and (clean_id in cl_name or session_id in cl_name):
+                            target_clusters.add(cl_name)
         except Exception as e:
-            print(f"[K3dManager] Warning deleting cluster: {e}")
-            return False
+            print(f"[K3dManager] Warning listing clusters: {e}")
+
+        success = True
+        for target in target_clusters:
+            try:
+                r = subprocess.run(["k3d", "cluster", "delete", target], capture_output=True, text=True, timeout=30)
+                if r.returncode == 0:
+                    print(f"[K3dManager] Deleted ephemeral cluster '{target}'.")
+            except Exception as e:
+                print(f"[K3dManager] Warning deleting cluster '{target}': {e}")
+                success = False
+
+        # Extra safety: remove any dangling docker containers for this cluster
+        try:
+            ps_res = subprocess.run(
+                ["docker", "ps", "-a", "--format", "{{.Names}}"],
+                capture_output=True, text=True, timeout=5
+            )
+            if ps_res.returncode == 0 and ps_res.stdout.strip():
+                for name in ps_res.stdout.strip().splitlines():
+                    name = name.strip()
+                    if name.startswith("k3d-cka-") and (clean_id in name or session_id in name):
+                        subprocess.run(["docker", "rm", "-f", name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+        except Exception:
+            pass
+
+        return success
 
 
 k3d_mgr = K3dClusterManager()

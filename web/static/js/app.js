@@ -523,6 +523,12 @@ async function loadSession() {
         const data = await res.json();
 
         isAdminUser = !!data.is_admin;
+        if (data.active) {
+            currentSession = data;
+            if (data.session_id) {
+                localStorage.setItem('cka_last_session_id', data.session_id);
+            }
+        }
         initWorkspaceFrames(data.terminal_port, data.novnc_port);
 
         // Workspace Actions dropdown always visible in header for both admin & candidate
@@ -667,7 +673,39 @@ async function startAssignedExam(presetFilename, tokenParam) {
 
     const tok = tokenParam || candidateUrlToken || new URLSearchParams(window.location.search).get('token') || undefined;
 
-    setLoadingState(true, 'Initializing exam', 'Preparing task 1 and configuring cluster environment...');
+    setLoadingState(true, 'Initializing Exam Environment', 'Preparing candidate desktop sandbox (TigerVNC + XFCE4)...');
+
+    const progressContainer = document.getElementById('loadingProgressContainer');
+    const fillEl = document.getElementById('loadingProgressFill');
+    const statusEl = document.getElementById('loadingProgressStatus');
+    const descEl = document.getElementById('loadingDesc');
+    if (progressContainer) progressContainer.style.display = 'flex';
+
+    let progressPercent = 15;
+    let stepIndex = 0;
+    const steps = [
+        { desc: 'Preparing candidate desktop sandbox (TigerVNC + XFCE4)...', status: 'Step 1 of 4: Launching desktop container' },
+        { desc: 'Provisioning Kubeadm nodes across compute fleet (node1, node2, node3)...', status: 'Step 2 of 4: Spawning cluster nodes' },
+        { desc: 'Injecting cross-node IP routing, /etc/hosts, and SSH credentials...', status: 'Step 3 of 4: Configuring fleet networking' },
+        { desc: 'Configuring cluster kubeconfig and loading Task 1 instructions...', status: 'Step 4 of 4: Finalizing environment' }
+    ];
+
+    function applyStep(s, pct) {
+        if (descEl) descEl.innerText = s.desc;
+        if (statusEl) statusEl.innerText = `${s.status} (${pct}%)`;
+        if (fillEl) fillEl.style.width = `${pct}%`;
+    }
+
+    applyStep(steps[0], progressPercent);
+
+    const progressTimer = setInterval(() => {
+        progressPercent = Math.min(92, progressPercent + Math.floor(Math.random() * 8) + 4);
+        if (progressPercent > 70) stepIndex = 3;
+        else if (progressPercent > 45) stepIndex = 2;
+        else if (progressPercent > 25) stepIndex = 1;
+        applyStep(steps[stepIndex], progressPercent);
+    }, 1000);
+
     try {
         const payload = (presetFilename === 'all') ? { all_questions: true } : { preset: presetFilename };
         if (tok) {
@@ -691,6 +729,11 @@ async function startAssignedExam(presetFilename, tokenParam) {
 
         if (!res.ok) throw new Error(await res.text());
         const data = await res.json();
+
+        if (fillEl) fillEl.style.width = '100%';
+        if (statusEl) statusEl.innerText = 'Step 4 of 4: Environment ready! Launching... (100%)';
+        await new Promise(r => setTimeout(r, 400));
+
         currentSession = data;
         localStorage.removeItem('cka_session_submitted');
         if (data.session_id) {
@@ -700,13 +743,20 @@ async function startAssignedExam(presetFilename, tokenParam) {
         initTimer(data.time_remaining_seconds, data);
         if (data.session_id) {
             initSessionWebSocket(data.session_id);
+            const vncFrame = document.getElementById('desktopFrame');
+            if (vncFrame) {
+                vncFrame.src = `/novnc/vnc.html?autoconnect=true&resize=remote&reconnect=true&path=ws/desktop/${encodeURIComponent(data.session_id)}`;
+            }
         }
+        connectTerminalWebSocket();
     } catch (err) {
         alert(`Failed to start exam: ${err.message}`);
     } finally {
+        clearInterval(progressTimer);
         setLoadingState(false);
     }
 }
+
 
 function showCapacityLimitModal(reason) {
     const msgElem = document.getElementById('capacityLimitMessage');
@@ -875,11 +925,17 @@ function updateUIWithSession(data) {
         syncTimer(data.time_remaining_seconds, data);
     }
     document.getElementById('taskProgressText').innerText = `Task ${task.task_num} of ${data.total_tasks}`;
+
+    // If on terminal tab and socket not connected or connected to wrong session, connect now
+    if (currentTab === 'terminal' && (!termSocket || termSocket.readyState === WebSocket.CLOSED || (data && data.session_id && termConnectedSid !== data.session_id))) {
+        connectTerminalWebSocket();
+    }
 }
 
 let term = null;
 let fitAddon = null;
 let termSocket = null;
+let termConnectedSid = null;
 let termOnDataDisposable = null;
 let termOnResizeDisposable = null;
 
@@ -894,7 +950,7 @@ function initTerminal() {
         fontSize: 14,
         lineHeight: 1.25,
         theme: {
-            background: '#090d14',
+            background: '#090d16',
             foreground: '#f1f5f9',
             cursor: '#38bdf8',
             selectionBackground: '#334155',
@@ -927,7 +983,10 @@ function initTerminal() {
         setTimeout(() => fitAddon.fit(), 100);
     }
 
-    connectTerminalWebSocket();
+    // Connect immediately only if session is already known or if active tab is terminal
+    if (currentSession && currentSession.session_id) {
+        connectTerminalWebSocket();
+    }
 
     window.addEventListener('resize', () => {
         if (fitAddon && currentTab === 'terminal') {
@@ -1025,13 +1084,18 @@ function showTerminalCopyToast(container) {
 }
 
 function connectTerminalWebSocket() {
+    const sid = currentSession && currentSession.session_id ? currentSession.session_id : null;
     if (termSocket && (termSocket.readyState === WebSocket.OPEN || termSocket.readyState === WebSocket.CONNECTING)) {
+        if (termConnectedSid === sid && sid !== null) {
+            return;
+        }
         try { termSocket.close(); } catch (_) {}
     }
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const sidParam = currentSession && currentSession.session_id ? `/${encodeURIComponent(currentSession.session_id)}` : '';
+    const sidParam = sid ? `/${encodeURIComponent(sid)}` : '';
     const wsUrl = `${protocol}//${window.location.host}/ws/terminal${sidParam}`;
 
+    termConnectedSid = sid;
     termSocket = new WebSocket(wsUrl);
     termSocket.binaryType = 'arraybuffer';
 
@@ -1051,6 +1115,7 @@ function connectTerminalWebSocket() {
     };
 
     termSocket.onclose = () => {
+        termConnectedSid = null;
         term.write('\r\n\x1b[31m[Session closed. Refresh to reconnect]\x1b[0m\r\n');
     };
 
@@ -1568,6 +1633,10 @@ window.switchWorkspaceTab = function (tab) {
         if (vncBtn) vncBtn.classList.remove('active');
         if (termContainer) termContainer.classList.add('active-frame');
         if (vncFrame) vncFrame.classList.remove('active-frame');
+        const sid = currentSession && currentSession.session_id ? currentSession.session_id : null;
+        if (!termSocket || termSocket.readyState === WebSocket.CLOSED || (sid && termConnectedSid !== sid)) {
+            connectTerminalWebSocket();
+        }
         if (fitAddon) {
             setTimeout(() => {
                 fitAddon.fit();
@@ -1584,7 +1653,7 @@ window.switchWorkspaceTab = function (tab) {
 
         const sid = (currentSession && currentSession.session_id) || 'active';
         const vncUrl = `/novnc/vnc.html?autoconnect=true&resize=remote&reconnect=true&path=ws/desktop/${encodeURIComponent(sid)}`;
-        if (vncFrame && (!vncFrame.src || vncFrame.src === 'about:blank' || !vncFrame.src.includes('/novnc/'))) {
+        if (vncFrame && (!vncFrame.src || vncFrame.src === 'about:blank' || !vncFrame.src.includes(`/ws/desktop/${encodeURIComponent(sid)}`))) {
             console.log('[VNC] Setting iframe src to dynamic ingress:', vncUrl);
             vncFrame.src = vncUrl;
         }

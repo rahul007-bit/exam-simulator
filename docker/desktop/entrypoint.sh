@@ -48,7 +48,21 @@ PYEOF
 chmod 600 /home/exam/.kube/config 2>/dev/null || true
 chmod 644 /home/exam/active_exam.md 2>/dev/null || true
 
+# Candidate SSH config for seamless inter-node access (ssh node1, ssh node2, ssh node3)
+mkdir -p /home/exam/.ssh
+cat << 'SSHEOF' > /home/exam/.ssh/config
+Host *
+    User root
+    StrictHostKeyChecking no
+    UserKnownHostsFile /dev/null
+    LogLevel ERROR
+SSHEOF
+chmod 700 /home/exam/.ssh
+chmod 600 /home/exam/.ssh/config
+chown -R exam:exam /home/exam/.ssh
+
 # Pre-seed Firefox profile to eliminate welcome screens, onboarding, and bloat
+
 mkdir -p /home/exam/.mozilla/firefox/default.profile
 cat << 'PREFS' > /home/exam/.mozilla/firefox/default.profile/prefs.js
 user_pref("browser.startup.homepage", "https://kubernetes.io/docs/home/");
