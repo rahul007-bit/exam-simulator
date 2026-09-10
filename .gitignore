@@ -6,3 +6,11 @@ var/
 .pytest_cache/
 .worktrees/
 docker/desktop/kubectl
+
+# Frontend (Vue 3 + Vite) — build output not committed (D-005)
+web/dist/
+web/frontend/node_modules/
+web/frontend/.vite/
+web/frontend/test-results/
+web/frontend/playwright-report/
+web/frontend/src/api/schema.d.ts

@@ -47,6 +47,11 @@ app.add_middleware(
 BASE_DIR = Path(__file__).parent.parent
 STATIC_DIR = BASE_DIR / "web" / "static"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
+# Built Vue SPA (FE-003). Produced by the frontend build on deploy; the output is
+# not committed (D-005). When it is absent the server degrades to the legacy
+# web/static UI so behaviour is unchanged until the FE-040 cutover.
+DIST_DIR = BASE_DIR / "web" / "dist"
+SPA_INDEX = DIST_DIR / "index.html"
 REPORTS_DIR = BASE_DIR / "reports"
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 RECORDINGS_DIR = BASE_DIR / "recordings"
@@ -2329,9 +2334,13 @@ async def _session_expiry_enforcer():
             print(f"[ExpiryEnforcer] Error: {e}")
 
 
-# Admin dashboard route
+# Admin dashboard route. Once a SPA build is present the unified Vue app owns
+# /admin (it branches on ?admin=1 internally); otherwise we keep serving the
+# legacy admin.html exactly as before (FE-003, PLAN.md §4).
 @app.get("/admin", response_class=HTMLResponse)
 def get_admin_page(request: Request):
+    if SPA_INDEX.is_file():
+        return HTMLResponse(content=SPA_INDEX.read_text(encoding="utf-8"))
     admin_html = STATIC_DIR / "admin.html"
     if admin_html.exists():
         return HTMLResponse(content=admin_html.read_text(encoding="utf-8"))
@@ -2343,5 +2352,45 @@ NOVNC_DIR = Path("/usr/share/novnc")
 if NOVNC_DIR.exists():
     app.mount("/novnc", StaticFiles(directory=str(NOVNC_DIR), html=True), name="novnc")
 
-# Mount static directory for frontend web UI
-app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
+
+# --- Built SPA (web/dist) with client-side-routing fallback (FE-003) ---
+# Route ordering matters: every /api and /ws route above (plus the /novnc mount)
+# is registered before this catch-all, so it only ever sees frontend
+# navigations and static build output. If no build is present we fall back to
+# the legacy web/static UI so behaviour is unchanged until the FE-040 cutover.
+if DIST_DIR.is_dir():
+    if (DIST_DIR / "assets").is_dir():
+        app.mount(
+            "/assets",
+            StaticFiles(directory=str(DIST_DIR / "assets")),
+            name="assets",
+        )
+
+    @app.get("/{full_path:path}", response_class=HTMLResponse)
+    async def spa_fallback(full_path: str):
+        # Never let an unknown API/WS/novnc path resolve to index.html.
+        head = full_path.split("/", 1)[0]
+        if head in ("api", "ws", "novnc"):
+            raise HTTPException(status_code=404, detail="Not found")
+
+        # Serve a real built file when one exists (hashed assets are mounted
+        # separately above; this also covers favicon.svg / robots.txt / etc.).
+        if full_path:
+            candidate = (DIST_DIR / full_path).resolve()
+            in_dist = candidate.is_relative_to(DIST_DIR.resolve())
+            if in_dist and candidate.is_file():
+                return FileResponse(candidate)
+
+        # SPA fallback: hand index.html to the Vue router for any app route
+        # (/, /admin, /login, /dashboard, /exam/:id, ...).
+        if SPA_INDEX.is_file():
+            return HTMLResponse(content=SPA_INDEX.read_text(encoding="utf-8"))
+
+        # Build dir vanished mid-request: degrade to the legacy UI.
+        legacy_index = STATIC_DIR / "index.html"
+        if legacy_index.is_file():
+            return HTMLResponse(content=legacy_index.read_text(encoding="utf-8"))
+        raise HTTPException(status_code=404, detail="Not found")
+else:
+    # No SPA build present: behave exactly as before FE-003.
+    app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")

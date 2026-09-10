@@ -1,0 +1,937 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CKA Labs FastAPI backend",
+    "version": "0.1.0",
+    "description": "OpenAPI snapshot of the FastAPI surface consumed by the Vue frontend (FE-004). The live spec is preferred (POST http://<host>:3000/openapi.json); this committed snapshot keeps `gen:api` fully offline. Shapes mirror web/server.py Pydantic models and route return values. NOTE: this snapshot is hand-authored because the platform host accepted the TCP connection but stalled before sending the response body (see .agents/FE-004-implementer-2/EVIDENCE.md)."
+  },
+  "servers": [{ "url": "/" }],
+  "tags": [
+    { "name": "session" },
+    { "name": "timer" },
+    { "name": "presets" },
+    { "name": "actions" },
+    { "name": "admin" }
+  ],
+  "paths": {
+    "/api/session": {
+      "get": {
+        "operationId": "getSession",
+        "tags": ["session"],
+        "parameters": [
+          { "name": "admin", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "candidate", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "preset", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "token", "in": "query", "required": false, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current session state (active, inactive, or invited)",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SessionResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/timer": {
+      "get": {
+        "operationId": "getTimer",
+        "tags": ["timer"],
+        "responses": {
+          "200": {
+            "description": "Server-synchronised timer state",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TimerResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/presets": {
+      "get": {
+        "operationId": "listPresets",
+        "tags": ["presets"],
+        "responses": {
+          "200": {
+            "description": "Available presets and the currently selected preset",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PresetsResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/presets/select": {
+      "post": {
+        "operationId": "selectPreset",
+        "tags": ["presets"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/PresetSelectRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Preset selected",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PresetSelectResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/start": {
+      "post": {
+        "operationId": "startSession",
+        "tags": ["session"],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/StartRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Newly started session",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SessionResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "429": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/session/restore": {
+      "post": {
+        "operationId": "restoreSession",
+        "tags": ["session"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RestoreSessionRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Restored session",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SessionResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "429": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/reset": {
+      "post": {
+        "operationId": "resetSession",
+        "tags": ["session"],
+        "responses": {
+          "200": {
+            "description": "Session cleared",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/StatusMessageResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/end": {
+      "post": {
+        "operationId": "endSession",
+        "tags": ["session"],
+        "responses": {
+          "200": {
+            "description": "Session ended (alias of reset)",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/StatusMessageResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/action/next": {
+      "post": {
+        "operationId": "actionNext",
+        "tags": ["actions"],
+        "responses": {
+          "200": {
+            "description": "Session advanced to the next task",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SessionResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/action/prev": {
+      "post": {
+        "operationId": "actionPrev",
+        "tags": ["actions"],
+        "responses": {
+          "200": {
+            "description": "Session moved to the previous task",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SessionResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/action/jump": {
+      "post": {
+        "operationId": "actionJump",
+        "tags": ["actions"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/JumpRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session jumped to the requested task",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SessionResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/action/flag": {
+      "post": {
+        "operationId": "actionFlag",
+        "tags": ["actions"],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/FlagRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Flag toggled",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/FlagResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/action/retry": {
+      "post": {
+        "operationId": "actionRetry",
+        "tags": ["actions"],
+        "responses": {
+          "200": {
+            "description": "Current task re-initialised",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/StatusMessageResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/action/submit": {
+      "post": {
+        "operationId": "actionSubmit",
+        "tags": ["actions"],
+        "responses": {
+          "200": {
+            "description": "Final scorecard report",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SubmitResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/admin/login": {
+      "post": {
+        "operationId": "adminLogin",
+        "tags": ["admin"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AdminLoginRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authenticated; sets the HttpOnly admin_token cookie",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AdminLoginResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/admin/check": {
+      "get": {
+        "operationId": "adminCheck",
+        "tags": ["admin"],
+        "responses": {
+          "200": {
+            "description": "Admin authentication state",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AdminCheckResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/logout": {
+      "post": {
+        "operationId": "adminLogout",
+        "tags": ["admin"],
+        "responses": {
+          "200": {
+            "description": "Logged out; clears the admin_token cookie",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AdminLogoutResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/config": {
+      "get": {
+        "operationId": "getAdminConfig",
+        "tags": ["admin"],
+        "responses": {
+          "200": {
+            "description": "Default preset configuration",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AdminConfigResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Error" }
+        }
+      },
+      "post": {
+        "operationId": "setAdminConfig",
+        "tags": ["admin"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AdminConfigRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated default preset configuration",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AdminSetConfigResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/admin/resources": {
+      "get": {
+        "operationId": "getAdminResources",
+        "tags": ["admin"],
+        "responses": {
+          "200": {
+            "description": "Host resource information",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ResourceInfo" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Error" }
+        }
+      },
+      "post": {
+        "operationId": "setAdminResources",
+        "tags": ["admin"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SetResourceLimitRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated host resource information",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ResourceInfo" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/admin/sessions/create": {
+      "post": {
+        "operationId": "adminCreateSessionInvite",
+        "tags": ["admin"],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateSessionInviteRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Created invitation",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CreateSessionInviteResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Error" },
+          "429": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/admin/sessions": {
+      "get": {
+        "operationId": "listAdminSessions",
+        "tags": ["admin"],
+        "responses": {
+          "200": {
+            "description": "Session history (active + archived)",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AdminSessionsResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    }
+  },
+  "components": {
+    "responses": {
+      "Error": {
+        "description": "Error response",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorDetail" }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "ErrorDetail": {
+        "type": "object",
+        "required": ["detail"],
+        "properties": {
+          "detail": { "type": "string" }
+        }
+      },
+      "StatusMessageResponse": {
+        "type": "object",
+        "required": ["status"],
+        "properties": {
+          "status": { "type": "string" },
+          "message": { "type": "string" }
+        }
+      },
+      "PresetLockedInfo": {
+        "type": "object",
+        "required": [
+          "filename",
+          "name",
+          "description",
+          "task_count",
+          "time_limit_minutes",
+          "pass_threshold_percent"
+        ],
+        "properties": {
+          "filename": { "type": "string" },
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "task_count": { "type": "integer" },
+          "time_limit_minutes": { "type": ["integer", "null"] },
+          "pass_threshold_percent": { "type": "number" }
+        }
+      },
+      "TaskScoreData": {
+        "type": "object",
+        "required": ["passed", "score", "max_score", "message"],
+        "properties": {
+          "passed": { "type": "boolean" },
+          "score": { "type": "integer" },
+          "max_score": { "type": "integer" },
+          "message": { "type": "string" }
+        }
+      },
+      "TaskData": {
+        "type": "object",
+        "required": [
+          "task_num",
+          "id",
+          "title",
+          "domain",
+          "difficulty",
+          "points",
+          "target_context",
+          "namespace",
+          "description",
+          "cluster_scoped",
+          "tags",
+          "is_flagged"
+        ],
+        "properties": {
+          "task_num": { "type": "integer" },
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "domain": { "type": "string" },
+          "difficulty": { "type": "string", "enum": ["easy", "medium", "hard", "crazy"] },
+          "points": { "type": "integer" },
+          "target_context": { "type": "string" },
+          "namespace": { "type": "string" },
+          "description": { "type": "string" },
+          "cluster_scoped": { "type": "boolean" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "is_flagged": { "type": "boolean" },
+          "score_data": {
+            "oneOf": [{ "$ref": "#/components/schemas/TaskScoreData" }, { "type": "null" }]
+          }
+        }
+      },
+      "SessionActive": {
+        "type": "object",
+        "required": [
+          "active",
+          "session_id",
+          "name",
+          "mode",
+          "status",
+          "current_index",
+          "total_tasks",
+          "time_remaining_seconds",
+          "created_at",
+          "server_timestamp",
+          "flagged_ids",
+          "is_admin"
+        ],
+        "properties": {
+          "active": { "type": "boolean", "const": true },
+          "session_id": { "type": "string" },
+          "candidate_token": { "type": ["string", "null"] },
+          "name": { "type": "string" },
+          "mode": { "type": "string" },
+          "status": { "type": "string" },
+          "current_index": { "type": "integer" },
+          "total_tasks": { "type": "integer" },
+          "time_limit_minutes": { "type": ["integer", "null"] },
+          "time_remaining_seconds": { "type": ["number", "null"] },
+          "created_at": { "type": "string" },
+          "start_timestamp": { "type": ["number", "null"] },
+          "end_timestamp": { "type": ["number", "null"] },
+          "server_timestamp": { "type": "number" },
+          "flagged_ids": { "type": "array", "items": { "type": "string" } },
+          "current_task": {
+            "oneOf": [{ "$ref": "#/components/schemas/TaskData" }, { "type": "null" }]
+          },
+          "terminal_port": { "type": "string" },
+          "novnc_port": { "type": "string" },
+          "is_admin": { "type": "boolean" }
+        }
+      },
+      "SessionInactive": {
+        "type": "object",
+        "required": ["active", "session", "locked_preset", "is_admin"],
+        "properties": {
+          "active": { "type": "boolean", "const": false },
+          "session": { "type": "null" },
+          "locked_preset": { "$ref": "#/components/schemas/PresetLockedInfo" },
+          "is_admin": { "type": "boolean" }
+        }
+      },
+      "SessionInvited": {
+        "type": "object",
+        "required": ["active", "invited", "preset", "token", "locked_preset", "is_admin"],
+        "properties": {
+          "active": { "type": "boolean", "const": false },
+          "invited": { "type": "boolean", "const": true },
+          "preset": { "type": "string" },
+          "token": { "type": "string" },
+          "locked_preset": { "$ref": "#/components/schemas/PresetLockedInfo" },
+          "is_admin": { "type": "boolean" }
+        }
+      },
+      "SessionResponse": {
+        "oneOf": [
+          { "$ref": "#/components/schemas/SessionActive" },
+          { "$ref": "#/components/schemas/SessionInactive" },
+          { "$ref": "#/components/schemas/SessionInvited" }
+        ]
+      },
+      "TimerResponse": {
+        "type": "object",
+        "required": ["active"],
+        "properties": {
+          "active": { "type": "boolean" },
+          "session_id": { "type": "string" },
+          "started_at": { "type": "string" },
+          "start_timestamp": { "type": "number" },
+          "end_timestamp": { "type": "number" },
+          "server_timestamp": { "type": "number" },
+          "time_limit_minutes": { "type": ["integer", "null"] },
+          "total_seconds": { "type": "integer" },
+          "elapsed_seconds": { "type": "integer" },
+          "time_remaining_seconds": { "type": ["integer", "null"] },
+          "error": { "type": "string" }
+        }
+      },
+      "Preset": {
+        "type": "object",
+        "required": ["filename", "name"],
+        "properties": {
+          "filename": { "type": "string" },
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "time_limit_minutes": { "type": ["integer", "null"] },
+          "pass_threshold_percent": { "type": "number" },
+          "questions": { "type": "array", "items": { "type": "string" } },
+          "task_count": { "type": "integer" }
+        }
+      },
+      "PresetsResponse": {
+        "type": "object",
+        "required": ["presets", "selected"],
+        "properties": {
+          "presets": { "type": "array", "items": { "$ref": "#/components/schemas/Preset" } },
+          "selected": { "type": "string" }
+        }
+      },
+      "PresetSelectRequest": {
+        "type": "object",
+        "required": ["preset"],
+        "properties": {
+          "preset": { "type": "string" }
+        }
+      },
+      "PresetSelectResponse": {
+        "type": "object",
+        "required": ["status", "preset", "info"],
+        "properties": {
+          "status": { "type": "string" },
+          "preset": { "type": "string" },
+          "info": { "$ref": "#/components/schemas/PresetLockedInfo" }
+        }
+      },
+      "StartRequest": {
+        "type": "object",
+        "properties": {
+          "preset": { "type": ["string", "null"] },
+          "all_questions": { "type": ["boolean", "null"] },
+          "question_ids": {
+            "oneOf": [{ "type": "array", "items": { "type": "string" } }, { "type": "null" }]
+          },
+          "candidate_token": { "type": ["string", "null"] }
+        }
+      },
+      "RestoreSessionRequest": {
+        "type": "object",
+        "required": ["session_id"],
+        "properties": {
+          "session_id": { "type": "string" }
+        }
+      },
+      "JumpRequest": {
+        "type": "object",
+        "required": ["task_num"],
+        "properties": {
+          "task_num": { "type": "integer" }
+        }
+      },
+      "FlagRequest": {
+        "type": "object",
+        "properties": {
+          "task_num": { "type": ["integer", "null"] }
+        }
+      },
+      "FlagResponse": {
+        "type": "object",
+        "required": ["id", "task_num", "is_flagged", "flagged_ids"],
+        "properties": {
+          "id": { "type": "string" },
+          "task_num": { "type": "integer" },
+          "is_flagged": { "type": "boolean" },
+          "flagged_ids": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "ScorecardRow": {
+        "type": "object",
+        "required": [
+          "task_num",
+          "id",
+          "title",
+          "domain",
+          "difficulty",
+          "context",
+          "score",
+          "max_score",
+          "passed",
+          "message"
+        ],
+        "properties": {
+          "task_num": { "type": "integer" },
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "domain": { "type": "string" },
+          "difficulty": { "type": "string" },
+          "context": { "type": "string" },
+          "score": { "type": "integer" },
+          "max_score": { "type": "integer" },
+          "passed": { "type": "boolean" },
+          "message": { "type": "string" }
+        }
+      },
+      "SubmitResponse": {
+        "type": "object",
+        "required": [
+          "scorecard",
+          "total_earned",
+          "total_possible",
+          "percentage",
+          "passed",
+          "threshold",
+          "session_id",
+          "exam_name",
+          "submitted_at"
+        ],
+        "properties": {
+          "scorecard": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ScorecardRow" }
+          },
+          "total_earned": { "type": "integer" },
+          "total_possible": { "type": "integer" },
+          "percentage": { "type": "number" },
+          "passed": { "type": "boolean" },
+          "threshold": { "type": "number" },
+          "session_id": { "type": "string" },
+          "exam_name": { "type": "string" },
+          "submitted_at": { "type": "string" },
+          "report_file": { "type": "string" }
+        }
+      },
+      "AdminLoginRequest": {
+        "type": "object",
+        "required": ["password"],
+        "properties": {
+          "password": { "type": "string" }
+        }
+      },
+      "AdminLoginResponse": {
+        "type": "object",
+        "required": ["status", "token", "authenticated"],
+        "properties": {
+          "status": { "type": "string" },
+          "token": { "type": "string" },
+          "authenticated": { "type": "boolean" }
+        }
+      },
+      "AdminCheckResponse": {
+        "type": "object",
+        "required": ["authenticated"],
+        "properties": {
+          "authenticated": { "type": "boolean" }
+        }
+      },
+      "AdminLogoutResponse": {
+        "type": "object",
+        "required": ["status", "authenticated"],
+        "properties": {
+          "status": { "type": "string" },
+          "authenticated": { "type": "boolean" }
+        }
+      },
+      "AdminConfigRequest": {
+        "type": "object",
+        "required": ["default_preset"],
+        "properties": {
+          "default_preset": { "type": "string" }
+        }
+      },
+      "AdminConfigResponse": {
+        "type": "object",
+        "required": ["default_preset"],
+        "properties": {
+          "default_preset": { "type": "string" }
+        }
+      },
+      "AdminSetConfigResponse": {
+        "type": "object",
+        "required": ["status", "default_preset"],
+        "properties": {
+          "status": { "type": "string" },
+          "default_preset": { "type": "string" }
+        }
+      },
+      "SetResourceLimitRequest": {
+        "type": "object",
+        "required": ["max_concurrent_sessions"],
+        "properties": {
+          "max_concurrent_sessions": { "type": "integer" }
+        }
+      },
+      "ResourceInfo": {
+        "type": "object",
+        "required": [
+          "total_mem_mb",
+          "available_mem_mb",
+          "used_mem_mb",
+          "free_mem_mb",
+          "running_containers",
+          "max_concurrent_sessions",
+          "recommended_max",
+          "can_start",
+          "reason"
+        ],
+        "properties": {
+          "total_mem_mb": { "type": "integer" },
+          "available_mem_mb": { "type": "integer" },
+          "used_mem_mb": { "type": "integer" },
+          "free_mem_mb": { "type": "integer" },
+          "running_containers": { "type": "integer" },
+          "max_concurrent_sessions": { "type": "integer" },
+          "recommended_max": { "type": "integer" },
+          "can_start": { "type": "boolean" },
+          "reason": { "type": "string" }
+        }
+      },
+      "CreateSessionInviteRequest": {
+        "type": "object",
+        "properties": {
+          "preset": { "type": ["string", "null"] }
+        }
+      },
+      "CreateSessionInviteResponse": {
+        "type": "object",
+        "required": ["token", "preset", "url"],
+        "properties": {
+          "token": { "type": "string" },
+          "preset": { "type": "string" },
+          "url": { "type": "string" }
+        }
+      },
+      "AdminSessionItem": {
+        "type": "object",
+        "required": [
+          "session_id",
+          "candidate_token",
+          "name",
+          "status",
+          "created_at",
+          "time_remaining_seconds",
+          "container_running",
+          "total_tasks",
+          "type",
+          "url"
+        ],
+        "properties": {
+          "session_id": { "type": ["string", "null"] },
+          "candidate_token": { "type": ["string", "null"] },
+          "name": { "type": "string" },
+          "status": { "type": "string" },
+          "created_at": { "type": "string" },
+          "archived_at": { "type": ["string", "null"] },
+          "time_remaining_seconds": { "type": ["number", "null"] },
+          "container_running": { "type": "boolean" },
+          "total_tasks": { "type": ["integer", "null"] },
+          "current_index": { "type": ["integer", "null"] },
+          "type": {
+            "type": "string",
+            "enum": ["active", "invite", "archived"]
+          },
+          "url": { "type": ["string", "null"] },
+          "scorecard_summary": { "type": ["object", "null"], "additionalProperties": true }
+        }
+      },
+      "AdminSessionsResponse": {
+        "type": "object",
+        "required": ["sessions", "total"],
+        "properties": {
+          "sessions": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/AdminSessionItem" }
+          },
+          "total": { "type": "integer" }
+        }
+      }
+    }
+  }
+}

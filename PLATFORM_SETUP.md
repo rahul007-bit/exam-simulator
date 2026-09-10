@@ -428,6 +428,7 @@ Environment=EXAM_ADMIN=0
 Environment=VNC_DISPLAY=:1
 Environment=XAUTHORITY=/home/exam/.Xauthority
 Environment=EXAM_HOME=/home/exam
+ExecStartPre=/bin/bash /root/cka-labs/tools/build-frontend.sh
 ExecStart=/root/cka-labs/.venv/bin/uvicorn web.server:app --host 0.0.0.0 --port 3000
 Restart=always
 RestartSec=3
@@ -435,6 +436,13 @@ RestartSec=3
 [Install]
 WantedBy=multi-user.target
 ```
+
+> **Frontend build (Vue 3 + Vite):** `build-frontend.sh` runs on every start and
+> builds `web/frontend/` into `web/dist/`, which `web/server.py` serves with an SPA
+> fallback. Requires **Node.js >= 20.19 + npm** on the host (the script also accepts
+> `bun`). `web/dist/` is git-ignored (D-005): it is built on deploy, never committed.
+> If Node/npm is absent the step is a no-op and the server falls back to the legacy
+> `web/static` UI until the FE-040 cutover.
 
 Enable and start services:
 ```bash
