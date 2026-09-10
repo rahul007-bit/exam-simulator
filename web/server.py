@@ -1181,9 +1181,9 @@ def restore_session(req: RestoreSessionRequest, request: Request):
                 pass
         redis_bus.touch_session_activity(session_id)
 
-    # Start desktop container
-    desktop_mgr.start_desktop(session_id)
-
+    # Re-run full provisioning: after a teardown the Incus fleet VMs are gone,
+    # so start_desktop alone would leave the desktop without ssh/kubectl access.
+    orchestrator.provision_session(session_id)
     actor = "admin" if is_admin_authenticated(request) else "candidate"
     try:
         recorder.attach_or_resume(session_id, session.name)

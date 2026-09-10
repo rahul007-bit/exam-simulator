@@ -20,7 +20,132 @@ from core.redis_bus import bus as redis_bus
 
 class SandboxOrchestrator:
     def __init__(self):
-        pass
+        # Per-session background fleet thread registry, so teardown can cancel+join
+        # provisioning if a session is torn down while its fleet is still in-flight
+        # (otherwise the last instances land AFTER the sweep and leak).
+        self._fleet_threads: Dict[str, threading.Thread] = {}
+        # Per-session cancel flags checked by the fleet thread between steps.
+        self._cancel_fleet: Dict[str, bool] = {}
+
+    def _fleet_cancelled(self, session_id: str) -> bool:
+        return self._cancel_fleet.get(session_id, False)
+
+    def _attach_fleet_to_desktop(
+        self,
+        session_id: str,
+        ips: Dict[str, str],
+        redis_host: str = "172.17.0.1",
+        total_timeout: float = 300.0,
+    ) -> bool:
+        """
+        (Re)attaches a provisioned kubeadm fleet to the candidate desktop:
+        /etc/hosts aliases, ssh config/key, and a verified kubectl connection.
+        Retries until the fleet endpoints are verified operable or timeout —
+        a fleet finishing while the desktop container is briefly absent/restarting
+        would otherwise leave the session permanently without ssh/kubectl access.
+        """
+        container = f"cka-desktop-{session_id}"
+        deadline = time.time() + total_timeout
+        attempt = 0
+        verified = False
+        while time.time() < deadline and not verified and not self._fleet_cancelled(session_id):
+            attempt += 1
+            try:
+                if not desktop_mgr.is_desktop_running(session_id):
+                    print(f"[Orchestrator] Desktop {container} not running (attach "
+                          f"attempt {attempt}), waiting to retry...", flush=True)
+                    time.sleep(5)
+                    continue
+
+                # 1. /etc/hosts aliases (guarded append: no sed -i — /etc/hosts is a
+                #    Docker bind mount, so in-place edit via rename fails with EBUSY)
+                for role, ip in ips.items():
+                    alias = f"{role}-{session_id}"
+                    hosts_cmd = (
+                        f"grep -qw {alias} /etc/hosts || "
+                        f"echo '{ip} {role} {alias}' >> /etc/hosts"
+                    )
+                    subprocess.run(
+                        ["docker", "exec", container, "bash", "-c", hosts_cmd],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10
+                    )
+
+                # 2. Passwordless root SSH for the candidate (ssh node1, ssh node2)
+                try:
+                    priv_key_path = None
+                    pub_key_path = None
+                    for key_cand in (Path("/root/.ssh/id_ed25519"), Path("/root/.ssh/id_rsa")):
+                        if key_cand.exists() and key_cand.is_file():
+                            priv_key_path = key_cand
+                            pub_cand = key_cand.with_suffix(".pub")
+                            if pub_cand.exists():
+                                pub_key_path = pub_cand
+                            break
+
+                    ssh_setup_cmd = (
+                        "mkdir -p /home/exam/.ssh && "
+                        "printf 'Host node1 node2 node3 node1-* node2-* node3-*\\n  User root\\n  StrictHostKeyChecking no\\n  UserKnownHostsFile /dev/null\\n  LogLevel ERROR\\n\\nHost *\\n  StrictHostKeyChecking no\\n  UserKnownHostsFile /dev/null\\n  LogLevel ERROR\\n' > /home/exam/.ssh/config && "
+                        "chmod 700 /home/exam/.ssh && chmod 600 /home/exam/.ssh/config && chown -R exam:exam /home/exam/.ssh"
+                    )
+                    subprocess.run(
+                        ["docker", "exec", container, "bash", "-c", ssh_setup_cmd],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5
+                    )
+
+                    if priv_key_path:
+                        subprocess.run(
+                            ["docker", "cp", str(priv_key_path), f"{container}:/home/exam/.ssh/id_rsa"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5
+                        )
+                        if pub_key_path:
+                            subprocess.run(
+                                ["docker", "cp", str(pub_key_path), f"{container}:/home/exam/.ssh/id_rsa.pub"],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5
+                            )
+                        subprocess.run(
+                            ["docker", "exec", container, "bash", "-c",
+                             "chown -R exam:exam /home/exam/.ssh && chmod 600 /home/exam/.ssh/id_rsa*"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5
+                        )
+                except Exception as ex:
+                    print(f"[Orchestrator] Warning configuring candidate SSH: {ex}", flush=True)
+
+                # 3. Refresh kubeconfig with the live kubeadm-vms context
+                try:
+                    desktop_mgr._inject_kubeconfig(session_id, redis_host=redis_host,
+                                                  node1_ip=ips.get("node1"))
+                except Exception as ex:
+                    print(f"[Orchestrator] Warning refreshing kubeconfig: {ex}", flush=True)
+
+                # 4. Verify operability from inside the desktop: host aliases + API reach
+                if "node1" in ips:
+                    proc = subprocess.run(
+                        ["docker", "exec", "-u", "exam", container,
+                         "bash", "-c",
+                         "getent hosts node1 node2 node3 || true; "
+                         "kubectl --context=kubeadm-vms get nodes --no-headers"],
+                        capture_output=True, text=True, timeout=60
+                    )
+                    text = (proc.stdout or "") + (proc.stderr or "")
+                    hosts_ok = sum(1 for n in ("node1", "node2", "node3") if f" {n}" in text) >= 3
+                    api_ok = "Ready" in text
+                    if hosts_ok and api_ok:
+                        verified = True
+                        print(f"[Orchestrator] Fleet attach VERIFIED for {session_id} "
+                              f"(attempt {attempt}): hosts aliases + kubectl OK.", flush=True)
+                    else:
+                        print(f"[Orchestrator] Fleet attach verify FAILED (attempt {attempt}) "
+                              f"for {session_id}: hosts={hosts_ok} api={api_ok} "
+                              f"text={(text[:150])!r}; retrying attach loop...", flush=True)
+                        time.sleep(8)
+                else:
+                    # No control plane: aliases-only attach is as good as it gets.
+                    verified = True
+                    print(f"[Orchestrator] Fleet attach done (no node1) for {session_id}.", flush=True)
+            except Exception as e:
+                print(f"[Orchestrator] Attach attempt {attempt} error: {e}", flush=True)
+                time.sleep(5)
+        return verified
 
     def provision_session(self, session_id: str, redis_host: str = "172.17.0.1") -> Dict[str, Any]:
         """Provisions all sandboxes for an exam session with strict resource limits."""
@@ -42,8 +167,16 @@ class SandboxOrchestrator:
 
         def _async_fleet_worker():
             try:
+                if self._fleet_cancelled(session_id):
+                    return
                 print(f"[Orchestrator] Background provisioning Incus Kubeadm fleet for session {session_id}...", flush=True)
                 ips = incus_mgr.provision_kubeadm_cluster(session_id, is_distributed=(not single_node))
+                if self._fleet_cancelled(session_id):
+                    # Teardown raced this thread mid-provisioning: the instances just
+                    # launched must not leak; clean them up before returning.
+                    print(f"[Orchestrator] Fleet provisioning for {session_id} cancelled mid-flight; cleaning up nodes...", flush=True)
+                    incus_mgr.delete_session_cluster(session_id)
+                    return
                 if ips:
                     # Expose live container IPs to question setup.sh scripts and graders,
                     # which drive nodes over SSH via NODE_1/NODE_2/NODE_3.
@@ -57,69 +190,19 @@ class SandboxOrchestrator:
                                 client.setex(f"session:{session_id}:nodeenv", 86400, _json.dumps(ips))
                     except Exception as ex:
                         print(f"[Orchestrator] Warning publishing node env: {ex}")
-                if ips and desktop_mgr.is_desktop_running(session_id):
-                    # 1. Update /etc/hosts for role resolution
-                    for role, ip in ips.items():
-                        try:
-                            subprocess.run(
-                                ["docker", "exec", f"cka-desktop-{session_id}", "bash", "-c", f"echo '{ip} {role} {role}-{session_id}' >> /etc/hosts"],
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5
-                            )
-                        except Exception:
-                            pass
-
-                    # 2. Configure passwordless root SSH for candidate user exam (ssh node1, ssh node2)
-                    try:
-                        priv_key_path = None
-                        pub_key_path = None
-                        for key_cand in (Path("/root/.ssh/id_ed25519"), Path("/root/.ssh/id_rsa")):
-                            if key_cand.exists() and key_cand.is_file():
-                                priv_key_path = key_cand
-                                pub_cand = key_cand.with_suffix(".pub")
-                                if pub_cand.exists():
-                                    pub_key_path = pub_cand
-                                break
-
-                        ssh_setup_cmd = (
-                            "mkdir -p /home/exam/.ssh && "
-                            "printf 'Host node1 node2 node3 node1-* node2-* node3-*\\n  User root\\n  StrictHostKeyChecking no\\n  UserKnownHostsFile /dev/null\\n  LogLevel ERROR\\n\\nHost *\\n  StrictHostKeyChecking no\\n  UserKnownHostsFile /dev/null\\n  LogLevel ERROR\\n' > /home/exam/.ssh/config && "
-                            "chmod 700 /home/exam/.ssh && chmod 600 /home/exam/.ssh/config && chown -R exam:exam /home/exam/.ssh"
-                        )
-                        subprocess.run(
-                            ["docker", "exec", f"cka-desktop-{session_id}", "bash", "-c", ssh_setup_cmd],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5
-                        )
-
-                        if priv_key_path:
-                            subprocess.run(
-                                ["docker", "cp", str(priv_key_path), f"cka-desktop-{session_id}:/home/exam/.ssh/id_rsa"],
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5
-                            )
-                            if pub_key_path:
-                                subprocess.run(
-                                    ["docker", "cp", str(pub_key_path), f"cka-desktop-{session_id}:/home/exam/.ssh/id_rsa.pub"],
-                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5
-                                )
-                            subprocess.run(
-                                ["docker", "exec", f"cka-desktop-{session_id}", "bash", "-c", "chown -R exam:exam /home/exam/.ssh && chmod 600 /home/exam/.ssh/id_rsa*"],
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5
-                            )
-                    except Exception as ex:
-                        print(f"[Orchestrator] Warning configuring candidate SSH: {ex}")
-
-                    # 3. Refresh and inject clean kubeconfig with live kubeadm-vms context
-                    try:
-                        desktop_mgr._inject_kubeconfig(session_id, redis_host=redis_host, node1_ip=ips.get("node1"))
-                        print(f"[Orchestrator] Kubeconfig updated with kubeadm-vms context for session {session_id}")
-                    except Exception as ex:
-                        print(f"[Orchestrator] Warning refreshing kubeconfig: {ex}")
-
+                if ips:
+                    # Verified, retrying attach (hosts aliases + ssh + kubeconfig)
+                    self._attach_fleet_to_desktop(session_id, ips, redis_host=redis_host)
                     print(f"[Orchestrator] Incus Kubeadm fleet ready and attached to desktop for {session_id}!", flush=True)
             except Exception as e:
                 print(f"[Orchestrator] Exception in background fleet provisioning: {e}", flush=True)
+            finally:
+                self._fleet_threads.pop(session_id, None)
 
         if enable_microvms and incus_mgr.is_available():
+            self._cancel_fleet.pop(session_id, None)
             fleet_thread = threading.Thread(target=_async_fleet_worker, daemon=True, name=f"fleet-bootstrap-{session_id}")
+            self._fleet_threads[session_id] = fleet_thread
             fleet_thread.start()
 
         return {
@@ -147,6 +230,19 @@ class SandboxOrchestrator:
                     redis_bus0.deregister_session(clean_id)
         except Exception as e:
             print(f"[Orchestrator] Error deregistering session: {e}", flush=True)
+
+        # 0.5 Cancel + join any in-flight fleet provisioning thread FIRST: teardown
+        # must not race a thread that is still launching instances, otherwise the
+        # remaining nodes land AFTER the sweep below and leak.
+        thr = self._fleet_threads.pop(session_id, None)
+        if thr is None:
+            thr = self._fleet_threads.pop(f"session-{clean_id}", None)
+        if thr and thr.is_alive():
+            # Do NOT join here (it would block this API call up to ~2 min): just
+            # flag cancel; the fleet thread checks it after each step and cleans
+            # up its own instances, so nothing leaks past the sweep below.
+            print(f"[Orchestrator] Flagging in-flight fleet thread cancelled for {session_id}...", flush=True)
+            self._cancel_fleet[session_id] = True
 
         # 1. Candidate desktop container
         try:
@@ -189,6 +285,9 @@ class SandboxOrchestrator:
                         f"session:{session_id}:state",
                         f"session:{session_id}",
                         f"token:{session_id}",
+                        # Global kubeconfig key survives with a 24h TTL otherwise and
+                        # boots the NEXT session's desktop with a dead control-plane IP.
+                        "k8s:kubeconfig",
                     ]:
                         client.delete(key)
                     if clean_id:
@@ -198,6 +297,7 @@ class SandboxOrchestrator:
                             f"session:{clean_id}:state",
                             f"session:{clean_id}",
                             f"token:{clean_id}",
+                            "k8s:kubeconfig",
                         ]:
                             client.delete(key)
         except Exception as e:

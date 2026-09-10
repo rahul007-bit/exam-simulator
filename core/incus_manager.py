@@ -373,7 +373,10 @@ class IncusClusterManager:
         return False
 
     def delete_node(self, node_name: str, remote_name: Optional[str] = None) -> bool:
-        """Force deletes an ephemeral container or microVM node. Idempotent."""
+        """Force deletes an ephemeral container or microVM node. Idempotent.
+        Retries briefly when the instance is mid-operation (busy) — incus rejects
+        creates a delete while a create/start/delete operation is still running,
+        which torn-down-sessions' deletes would otherwise leak instances on."""
         if not self.is_available():
             return True
 
@@ -384,19 +387,26 @@ class IncusClusterManager:
 
         pfx = self._target_prefix(remote_name)
         target = f"{pfx}{node_name}"
-        try:
-            # Forcefully stop first
-            self._run_incus(["stop", "-f", target], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
-            # Force delete
-            res = self._run_incus(["delete", "-f", target], timeout=30)
-            err = (res.stderr or "").lower()
-            if res.returncode == 0 or "not found" in err or "doesn't exist" in err or "does not exist" in err:
-                return True
-            print(f"[IncusManager] Error deleting {target}: {res.stderr.strip()}", flush=True)
-            return False
-        except Exception as ex:
-            print(f"[IncusManager] Exception deleting {target}: {ex}")
-            return False
+        last_err = ""
+        for _attempt in range(4):
+            try:
+                # Forcefully stop first
+                self._run_incus(["stop", "-f", target], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
+                # Force delete
+                res = self._run_incus(["delete", "-f", target], timeout=30)
+                err = (res.stderr or "").lower()
+                last_err = res.stderr.strip()
+                if res.returncode == 0 or "not found" in err or "doesn't exist" in err or "does not exist" in err:
+                    return True
+                if "busy" not in err:
+                    break
+                # Instance mid-operation: short backtrack, then retry the delete.
+                time.sleep(5)
+            except Exception as ex:
+                print(f"[IncusManager] Exception deleting {target}: {ex}")
+                return False
+        print(f"[IncusManager] Error deleting {target}: {last_err}", flush=True)
+        return False
 
     def get_node_ip(self, node_name: str, remote_name: Optional[str] = None) -> Optional[str]:
         """Retrieves IPv4 address of an incus instance on its global network interface."""
