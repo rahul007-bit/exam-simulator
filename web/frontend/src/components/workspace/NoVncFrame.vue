@@ -8,7 +8,7 @@ import { VNC_ALLOW, buildNoVncUrl, postClipboardToFrame } from '@/composables/us
  *
  * An `<iframe>` pointed at the server's compiled `/novnc/vnc.html` bundle. The
  * URL/params and `allow` contract are preserved byte-for-byte from the legacy
- * client (D-007): see `web/static/index.html:142` and `web/static/js/app.js:1655`.
+ * client (D-007).
  *
  * State preservation: `src` is set once when the island first becomes active and
  * is intentionally never cleared while it stays mounted, so switching to the
@@ -21,7 +21,7 @@ const props = withDefaults(
     sessionId?: string
     /** Whether this frame is the visible workspace tab. */
     active?: boolean
-    /** Observe mode: appends `view_only=true` (admin, legacy `admin.js:778`). */
+    /** Observe mode: appends `view_only=true` (admin). */
     viewOnly?: boolean
     title?: string
     ariaLabel?: string
@@ -62,7 +62,7 @@ watch(
   },
 )
 
-/** Force a fresh noVNC connection (legacy `frame.src = frame.src`, `app.js:1737`). */
+/** Force a fresh noVNC connection (legacy `frame.src = frame.src`). */
 function reload(): void {
   const next = currentUrl()
   src.value = 'about:blank'
@@ -71,7 +71,7 @@ function reload(): void {
   })
 }
 
-/** Push host clipboard text into the island (`syncTextToVnc`, `app.js:256`). */
+/** Push host clipboard text into the island (`syncTextToVnc`). */
 function sendClipboard(text: string): boolean {
   return postClipboardToFrame(frameRef.value, text)
 }

@@ -5,14 +5,14 @@ import { postClipboardToFrame } from '@/composables/useVnc'
 /**
  * useClipboard (FE-027) — bidirectional host <-> VNC desktop clipboard sync.
  *
- * Faithful port of the legacy candidate bridge (`web/static/js/app.js`), per the
- * strict-parity decision D-007:
+ * Faithful port of the legacy candidate bridge, per the strict-parity
+ * decision D-007:
  *
- *   - `syncTextToVnc`              (`app.js:256`) host    -> desktop
- *   - `handleIncomingVncClipboard` (`app.js:400`) desktop -> host
- *   - `syncFromVncClipboard`       (`app.js:436`) HTTP fallback read
- *   - `copyFromDesktopToHost`      (`app.js:459`) overflow action
- *   - user-gesture flush of `pendingHostClipboardText` (`app.js:120-130`)
+ *   - `syncTextToVnc`              host    -> desktop
+ *   - `handleIncomingVncClipboard` desktop -> host
+ *   - `syncFromVncClipboard`       HTTP fallback read
+ *   - `copyFromDesktopToHost`      overflow action
+ *   - user-gesture flush of `pendingHostClipboardText`
  *
  * Transport:
  *   - WS `/ws/session/<sid>`: inbound `{type:'clipboard_update', text}` and
@@ -67,7 +67,7 @@ export function parseClipboardUpdate(raw: unknown): ClipboardUpdate | null {
   }
 }
 
-/** Legacy `fallbackCopyText` (`app.js:309`) — `execCommand` copy for insecure contexts. */
+/** Legacy `fallbackCopyText` — `execCommand` copy for insecure contexts. */
 export function fallbackCopyText(text: string, doc: Document | undefined): void {
   if (!doc || !text) return
   const area = doc.createElement('textarea')
@@ -216,7 +216,7 @@ export function useClipboard(options: UseClipboardOptions = {}) {
     }
   }
 
-  /** `syncTextToVnc` (`app.js:256`) — host -> desktop (postMessage + WS/HTTP). */
+  /** `syncTextToVnc` — host -> desktop (postMessage + WS/HTTP). */
   function sendToVnc(text: string): void {
     if (!text) return
     lastKnownHostClipboard = text.trim()
@@ -238,7 +238,7 @@ export function useClipboard(options: UseClipboardOptions = {}) {
     void postClipboardToServer(text)
   }
 
-  /** `handleIncomingVncClipboard` (`app.js:400`) — desktop -> host. */
+  /** `handleIncomingVncClipboard` — desktop -> host. */
   async function handleVncClipboard(text: string, explicitUserAction = false): Promise<void> {
     if (!text || typeof text !== 'string') return
     const normalized = text.trim()
@@ -274,7 +274,7 @@ export function useClipboard(options: UseClipboardOptions = {}) {
     }
   }
 
-  /** `syncFromVncClipboard` (`app.js:436`) — HTTP read, skipped while WS is connected. */
+  /** `syncFromVncClipboard` — HTTP read, skipped while WS is connected. */
   async function syncFromVnc(explicitUserAction = false): Promise<void> {
     if (isSyncingClipboard) return
     if (connected.value && !explicitUserAction) return
@@ -292,7 +292,7 @@ export function useClipboard(options: UseClipboardOptions = {}) {
     }
   }
 
-  /** `copyFromDesktopToHost` (`app.js:459`) — the overflow "Copy from Desktop" action. */
+  /** `copyFromDesktopToHost` — the overflow "Copy from Desktop" action. */
   async function copyFromDesktopToHost(): Promise<boolean> {
     let text = (latestDesktopClipboard.value || '').trim()
     if (!text) text = ((await getClipboardFromServer()) ?? '').trim()
@@ -324,7 +324,7 @@ export function useClipboard(options: UseClipboardOptions = {}) {
 
   /**
    * Flush a clipboard write that was blocked for lack of a user gesture. Must be
-   * invoked from a real `click`/`pointerdown`/`keydown` handler (`app.js:120`).
+   * invoked from a real `click`/`pointerdown`/`keydown` handler.
    * Returns `true` when text was pending and a write was attempted.
    */
   function flushPendingHostClipboard(): boolean {
@@ -337,7 +337,7 @@ export function useClipboard(options: UseClipboardOptions = {}) {
     return true
   }
 
-  /** `document` `copy` handler (`app.js:170`) — read the host clipboard, push to VNC. */
+  /** `document` `copy` handler — read the host clipboard, push to VNC. */
   function syncHostClipboard(): void {
     setTimeout(() => {
       void (async () => {

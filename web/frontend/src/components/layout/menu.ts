@@ -3,10 +3,10 @@ import type { HeaderMenuItem, HeaderProgress, OverflowMenuOptions } from './type
 /**
  * Pure header helpers (FE-020).
  *
- * Ordering and admin gating mirror the legacy workspace dropdown
- * (`web/static/index.html:39-65`): Fullscreen, Reload, New tab, Copy from
- * Desktop, Recordings & Review, then admin-only End/Reset. Copy session ID is
- * prepended because the session-id badge (`app.js:500`) moved into the menu.
+ * Ordering and admin gating mirror the legacy workspace dropdown: Fullscreen,
+ * Reload, New tab, Copy from Desktop, Recordings & Review, then admin-only
+ * End/Reset. Copy session ID is prepended because the session-id badge moved
+ * into the menu.
  */
 
 const PRIMARY_ITEMS: readonly HeaderMenuItem[] = [

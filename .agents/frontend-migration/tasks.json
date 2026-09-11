@@ -1246,8 +1246,8 @@
         "FE-034",
         "FE-035"
       ],
-      "owner": null,
-      "status": "todo",
+      "owner": "implementer-fe040",
+      "status": "verified",
       "verifier": "independent-agent",
       "deliverable": "remove web/static app.js/admin.js/old HTML; serve only built SPA; update server mounts",
       "acceptance": [
@@ -1259,7 +1259,7 @@
         "grep for legacy references",
         "navigate all routes"
       ],
-      "evidence": null,
+      "evidence": ".agents/fe040-verifier/EVIDENCE.md",
       "notes": "",
       "tests": [
         {

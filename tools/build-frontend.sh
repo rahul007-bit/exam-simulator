@@ -2,9 +2,10 @@
 # Build the Vue 3 SPA (web/frontend) into web/dist (FE-003, D-005).
 #
 # The output is NOT committed; this runs on deploy so web/server.py can serve
-# the built app with an SPA fallback. Guarded so a host without Node tooling
-# still boots: it exits 0 (a no-op) when the scaffold or npm/bun is absent,
-# leaving web/server.py to fall back to the legacy web/static UI.
+# the built SPA. Since the FE-040 cutover the built SPA is the only UI. Guarded
+# so a host without Node tooling still boots: it exits 0 (a no-op) when the
+# scaffold or npm/bun is absent, but warns that the SPA will be unavailable
+# (the server returns 503 until web/dist exists).
 set -u
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -12,7 +13,7 @@ FRONTEND_DIR="$DIR/web/frontend"
 DIST_DIR="$DIR/web/dist"
 
 if [ ! -f "$FRONTEND_DIR/package.json" ]; then
-    echo "[build-frontend] No frontend scaffold at $FRONTEND_DIR; skipping (legacy web/static will be served)."
+    echo "[build-frontend] No frontend scaffold at $FRONTEND_DIR; skipping (SPA will be unavailable until web/dist exists)."
     exit 0
 fi
 
@@ -25,7 +26,7 @@ elif command -v bun >/dev/null 2>&1; then
 else
     echo "[build-frontend] WARNING: neither npm nor bun found; skipping frontend build." >&2
     if [ ! -f "$DIST_DIR/index.html" ]; then
-        echo "[build-frontend] WARNING: web/dist/index.html absent; server will serve legacy web/static." >&2
+        echo "[build-frontend] WARNING: web/dist/index.html absent; the SPA will be unavailable (server returns 503)." >&2
     fi
     exit 0
 fi

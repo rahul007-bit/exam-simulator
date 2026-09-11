@@ -3,33 +3,33 @@ import { getCurrentInstance, onBeforeUnmount, onMounted } from 'vue'
 /**
  * useVnc (FE-026) — URL + `postMessage` helpers for the noVNC desktop island.
  *
- * Strict parity with the legacy candidate client (D-007, `web/static/js/app.js`
- * and `web/server.py`): the iframe is served by the `/novnc` StaticFiles mount
- * and its websockify `path` points at the `/novnc/ws/desktop/<sessionId>` proxy
- * route. The query string is assembled by hand — **not** `URLSearchParams` —
- * because the latter percent-encodes the `/` in `ws/desktop/<sid>` and would
- * change the URL contract the server and noVNC expect.
+ * Strict parity with the legacy candidate client (D-007, `web/server.py`):
+ * the iframe is served by the `/novnc` StaticFiles mount and its websockify
+ * `path` points at the `/novnc/ws/desktop/<sessionId>` proxy route. The query
+ * string is assembled by hand — **not** `URLSearchParams` — because the latter
+ * percent-encodes the `/` in `ws/desktop/<sid>` and would change the URL
+ * contract the server and noVNC expect.
  *
- * Legacy references:
- *   - URL:   `app.js:1655` (candidate), `admin.js:778` (view-only observe)
- *   - allow: `index.html:142`
- *   - inbound messages: `app.js:156-167`
- *   - outbound clipboard: `app.js:260-266` (`{ type: 'SET_CLIPBOARD', text }`)
+ * Legacy contract:
+ *   - URL: candidate load, view-only observe
+ *   - allow: the iframe `allow` attribute
+ *   - inbound messages: `VNC_CLIPBOARD` / `VNC_DISCONNECTED`
+ *   - outbound clipboard: `{ type: 'SET_CLIPBOARD', text }`
  */
 
-/** iframe `allow` attribute — legacy `index.html:142`, preserved verbatim. */
+/** iframe `allow` attribute, preserved verbatim from the legacy client. */
 export const VNC_ALLOW = 'clipboard-read *; clipboard-write *; fullscreen *; keyboard-map *'
 
 /** Session id sentinel used when no live session exists (legacy `|| 'active'`). */
 export const VNC_DEFAULT_SESSION = 'active'
 
-/** Outbound message type: host → noVNC clipboard sync (`app.js:264`). */
+/** Outbound message type: host → noVNC clipboard sync. */
 export const VNC_SET_CLIPBOARD = 'SET_CLIPBOARD'
 
-/** Inbound message type: noVNC → host clipboard (`app.js:157`). */
+/** Inbound message type: noVNC → host clipboard. */
 export const VNC_CLIPBOARD_EVENT = 'VNC_CLIPBOARD'
 
-/** Inbound message type: noVNC → host disconnect (`app.js:160`). */
+/** Inbound message type: noVNC → host disconnect. */
 export const VNC_DISCONNECTED_EVENT = 'VNC_DISCONNECTED'
 
 export interface VncClipboardMessage {
@@ -44,7 +44,7 @@ export interface VncDisconnectedMessage {
 export type VncInboundMessage = VncClipboardMessage | VncDisconnectedMessage
 
 export interface BuildNoVncUrlOptions {
-  /** Observe mode: adds `view_only=true` (legacy `admin.js:778`). */
+  /** Observe mode: adds `view_only=true`. */
   viewOnly?: boolean
 }
 
@@ -93,7 +93,7 @@ export function postToFrame(frame: HTMLIFrameElement | null, message: unknown): 
   }
 }
 
-/** Sync host clipboard text to the desktop island (`syncTextToVnc`, `app.js:256`). */
+/** Sync host clipboard text to the desktop island (`syncTextToVnc`). */
 export function postClipboardToFrame(frame: HTMLIFrameElement | null, text: string): boolean {
   if (!text) return false
   return postToFrame(frame, { type: VNC_SET_CLIPBOARD, text })

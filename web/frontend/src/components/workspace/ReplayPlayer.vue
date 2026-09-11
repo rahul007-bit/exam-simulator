@@ -20,7 +20,7 @@ import '@xterm/xterm/css/xterm.css'
  * with the active entry synced to the playhead; clicking an entry seeks.
  *
  * Parity notes: only `"o"` frames are written, `reset()` + re-feed on seek,
- * `mm:ss` times, and a 0.5–10x speed range — matching `app.js`.
+ * `mm:ss` times, and a 0.5–10x speed range — matching the legacy replay engine.
  */
 
 const props = withDefaults(

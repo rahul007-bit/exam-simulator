@@ -8,8 +8,8 @@ import { useFullscreen } from '@/composables/useFullscreen'
 /**
  * FullscreenGuard (FE-028) — the "EXAM LOCKED: FULLSCREEN REQUIRED" overlay.
  *
- * Ported from the legacy `showFullscreenWarning` (`web/static/js/app.js:1797`),
- * redesigned to the slate/indigo system (D-003): severity conveyed by colour
+ * Ported from the legacy `showFullscreenWarning` overlay, redesigned to the
+ * slate/indigo system (D-003): severity conveyed by colour
  * only, with no animated keyframes, shadow effects or emoji. It reads the shared
  * `useFullscreen` singleton so the candidate view can call `enter()` on Start
  * while this component reacts to the resulting state.

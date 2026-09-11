@@ -441,8 +441,8 @@ WantedBy=multi-user.target
 > builds `web/frontend/` into `web/dist/`, which `web/server.py` serves with an SPA
 > fallback. Requires **Node.js >= 20.19 + npm** on the host (the script also accepts
 > `bun`). `web/dist/` is git-ignored (D-005): it is built on deploy, never committed.
-> If Node/npm is absent the step is a no-op and the server falls back to the legacy
-> `web/static` UI until the FE-040 cutover.
+> The built SPA is required: if the build is absent the server returns **503** until
+> `web/dist` exists (FE-040 cutover removed the legacy static UI).
 
 Enable and start services:
 ```bash

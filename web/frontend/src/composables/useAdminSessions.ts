@@ -17,7 +17,7 @@ import { apiRequest } from '@/api/client'
  *
  * `identifier` may be either a `session_id` (active/archived rows) or a
  * `candidate_token` (pending invites); the backend resolves either (parity with
- * the legacy `admin.js` prompts). The list is refreshed after every successful
+ * the legacy admin prompts). The list is refreshed after every successful
  * mutation so the table reflects archived/removed rows.
  *
  * FE-036 makes mutations non-blocking (GCP-style): pending state is tracked

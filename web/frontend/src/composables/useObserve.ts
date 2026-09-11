@@ -28,7 +28,7 @@ import { buildNoVncUrl } from '@/composables/useVnc'
  * A fetch that resolves after the target changed is discarded via a request
  * token, so a stale response can never populate the wrong session.
  *
- * Parity reference: legacy observe mode in `web/static/js/admin.js:765-1045`.
+ * Parity reference: the legacy admin observe mode.
  */
 
 export type ObserveAction = 'terminate' | 'reset' | 'end'

@@ -8,7 +8,7 @@ import type { BadgeVariant } from '@/components/ui'
  * `*.vue` declaration types SFCs as opaque components that cannot carry named
  * type exports, and because the state machine is worth unit-testing on its own.
  *
- * State precedence mirrors the legacy drawer (`web/static/js/app.js:1456`):
+ * State precedence mirrors the legacy drawer:
  * current → flagged → scored → pending. A scored task never reveals pass/fail
  * during the exam; it only means the task has been evaluated.
  */

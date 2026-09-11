@@ -3,8 +3,8 @@ import type { ComputedRef, Ref } from 'vue'
 
 /**
  * useReplay (FE-029) — the asciinema `.cast` replay engine for the recordings
- * island. Ports the legacy candidate replay (`web/static/js/app.js`
- * `parseCastRecording` / `playReplay` / `replayTick` / `seekReplay`) into a
+ * island. Ports the legacy candidate replay (`parseCastRecording` /
+ * `playReplay` / `replayTick` / `seekReplay`) into a
  * ref-driven composable that keeps the xterm instance out of Vue's reactivity
  * system exactly like `useTerminal`.
  *

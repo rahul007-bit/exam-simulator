@@ -12,7 +12,7 @@ import type { IconName } from '@/components/ui'
  * WorkspaceTabs (FE-026) — the 36px segmented Desktop/Terminal control and the
  * viewport that hosts the two imperative islands.
  *
- * Behaviour preserved from the legacy `switchWorkspaceTab` (`app.js:1624`):
+ * Behaviour preserved from the legacy `switchWorkspaceTab` handler:
  * both frames stay mounted and only visibility toggles, so the noVNC session and
  * the terminal socket survive a round-trip switch. Colours come from FE-012
  * tokens only — no raw hex, glow or emoji.

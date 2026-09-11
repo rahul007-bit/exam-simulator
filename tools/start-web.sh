@@ -16,8 +16,9 @@ else
     PYTHON_BIN="python3"
 fi
 
-# Build the Vue SPA into web/dist on deploy (FE-003). No-op when npm/bun are
-# absent, in which case web/server.py serves the legacy web/static UI.
+# Build the Vue SPA into web/dist on deploy (FE-003). Since the FE-040 cutover
+# the built SPA is the only UI: if the build is absent (npm/bun missing) the
+# server returns 503 until web/dist exists.
 "$DIR/tools/build-frontend.sh"
 
 exec "$PYTHON_BIN" -m uvicorn web.server:app --host "$HOST" --port "$PORT"

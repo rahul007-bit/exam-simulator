@@ -2,7 +2,7 @@
 
 > GENERATED FILE - do not edit by hand.
 > Canonical data: `.agents/frontend-migration/tasks.json`.
-> Regenerate with `python scripts/agents_board.py`. Last generated: 2026-09-10T17:08:07Z.
+> Regenerate with `python scripts/agents_board.py`. Last generated: 2026-09-10T18:47:43Z.
 
 **Program:** `frontend-migration`  
 **Branch:** `feature/frontend-vue-migration`  
@@ -11,10 +11,10 @@
 
 | Status | Count |
 | :--- | ---: |
-| todo | 18 |
+| todo | 17 |
 | claimed | 0 |
 | in-review | 0 |
-| verified | 28 |
+| verified | 29 |
 | blocked | 0 |
 | rejected | 0 |
 | **total** | **46** |
@@ -87,7 +87,7 @@
 
 | ID | Title | Depends | Owner | Status | Verifier | Evidence |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `FE-040` | Legacy removal and static cutover | FE-020, FE-021, FE-022, FE-023, FE-024, FE-025, FE-026, FE-027, FE-028, FE-029, FE-030, FE-031, FE-032, FE-033, FE-034, FE-035 | - | todo | independent-agent | - |
+| `FE-040` | Legacy removal and static cutover | FE-020, FE-021, FE-022, FE-023, FE-024, FE-025, FE-026, FE-027, FE-028, FE-029, FE-030, FE-031, FE-032, FE-033, FE-034, FE-035 | implementer-fe040 | verified | independent-agent | .agents/fe040-verifier/EVIDENCE.md |
 | `FE-041` | Self-host fonts and dependencies (offline) | FE-040 | - | todo | independent-agent | - |
 | `FE-042` | Playwright E2E and axe accessibility | FE-040 | - | todo | independent-agent | - |
 | `FE-043` | Update docs (README, HANDOVER, PLATFORM_SETUP) | FE-040 | - | todo | independent-agent | - |

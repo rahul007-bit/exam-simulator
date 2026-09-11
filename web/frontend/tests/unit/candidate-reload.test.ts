@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
  * FE-026/overflow wiring: the candidate header "Reload" action must match the
- * legacy `reloadWorkspaceFrame` (app.js:1726) — reconnect the terminal when the
+ * legacy `reloadWorkspaceFrame` — reconnect the terminal when the
  * terminal tab is active, otherwise force a fresh noVNC connection by reloading
  * the frame. `WorkspaceTabs` is stubbed so the test observes which imperative
  * handle `CandidateView.onAction('reload')` drives.

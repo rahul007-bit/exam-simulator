@@ -8,16 +8,15 @@ import { useVnc } from '@/composables/useVnc'
 /**
  * ClipboardBridge (FE-027) — headless host <-> noVNC clipboard bridge.
  *
- * Mounts every browser listener the legacy candidate client registered
- * (`web/static/js/app.js:99-179`) and wires them to `useClipboard`:
+ * Mounts every browser listener the legacy candidate client registered and
+ * wires them to `useClipboard`:
  *
  *   - `click` / `pointerdown` / `keydown` (capture, passive) flush a clipboard
- *     write that was blocked for lack of a user gesture (`app.js:120-130`);
- *   - `copy` reads the host clipboard and pushes it to the desktop (`app.js:170`);
- *   - `visibilitychange` / `focus` resync from the desktop when the WS is down
- *     (`app.js:99-111`);
+ *     write that was blocked for lack of a user gesture;
+ *   - `copy` reads the host clipboard and pushes it to the desktop;
+ *   - `visibilitychange` / `focus` resync from the desktop when the WS is down;
  *   - `VNC_CLIPBOARD` window messages from the noVNC island feed the host
- *     clipboard (`app.js:156-159`).
+ *     clipboard.
  *
  * It renders nothing meaningful: the hidden `<span>` keeps the component inert
  * and gives integrations a stable `data-testid` hook. Disposed on unmount.

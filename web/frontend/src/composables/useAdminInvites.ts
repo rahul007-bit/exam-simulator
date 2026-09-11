@@ -12,9 +12,9 @@ import { fallbackCopyText } from '@/composables/useClipboard'
  *   POST /api/admin/sessions/create -> { token, preset, url }
  *
  * The backend returns a root-relative `url` (`/?token=<token>`). The legacy
- * admin surface composed the absolute link from `window.location.origin`
- * (`admin.js:356`); `buildInviteUrl` preserves that behavior and passes an
- * already-absolute URL through untouched.
+ * admin surface composed the absolute link from `window.location.origin`;
+ * `buildInviteUrl` preserves that behavior and passes an already-absolute URL
+ * through untouched.
  *
  * Mutations rethrow so the view can toast the server `detail` (e.g. the HTTP
  * 429 "Server resource limit reached…") while the composable also records it in

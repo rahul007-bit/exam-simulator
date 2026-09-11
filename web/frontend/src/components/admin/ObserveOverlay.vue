@@ -315,7 +315,7 @@ watch(
             :min-right="480"
           >
             <!-- Left: candidate task instructions + full task list (legacy
-                 `refreshObserveData`, `web/static/js/admin.js:788-827`). -->
+                 `refreshObserveData`). -->
             <template #left>
               <aside
                 class="flex h-full w-full flex-col bg-surface"

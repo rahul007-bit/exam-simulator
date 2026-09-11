@@ -8,8 +8,8 @@ import type { SessionResponse } from '@/api/session'
 /**
  * Warning/critical thresholds (seconds remaining).
  *
- * These mirror the legacy server-authoritative timer controller (`app.js`
- * `updateTimerDisplay`): below 10 minutes the timer is critical, below 30
+ * These mirror the legacy server-authoritative timer controller
+ * (`updateTimerDisplay`): below 10 minutes the timer is critical, below 30
  * minutes it is a warning. Both states are communicated with **colour only**
  * (no pulse/glow), using the AA-safe semantic text tokens (FE-023).
  */

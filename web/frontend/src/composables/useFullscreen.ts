@@ -4,12 +4,12 @@ import type { MaybeRefOrGetter } from 'vue'
 /**
  * Fullscreen anti-cheat composable (FE-028).
  *
- * Ports the legacy fullscreen guard from `web/static/js/app.js`:
- *   - `enterCandidateFullscreen` (`app.js:1787`) — enter on exam start
- *   - `showFullscreenWarning`    (`app.js:1797`) — lock overlay on exit
- *   - `requestKeyboardLock`      (`app.js:1767`) — Keyboard Lock API where supported
- *   - `releaseKeyboardLock`      (`app.js:1779`)
- *   - `initFullscreenGuard`       (`app.js:1829`) — fullscreenchange + input guards
+ * Ports the legacy fullscreen guard:
+ *   - `enterCandidateFullscreen` — enter on exam start
+ *   - `showFullscreenWarning`    — lock overlay on exit
+ *   - `requestKeyboardLock`      — Keyboard Lock API where supported
+ *   - `releaseKeyboardLock`
+ *   - `initFullscreenGuard`       — fullscreenchange + input guards
  *
  * All browser-specific behaviour is isolated here (PLAN §7 "Fullscreen/keyboard-lock
  * browser fragility"). Every capability is feature-detected, and every async call is
@@ -48,7 +48,7 @@ type FullscreenDocument = Document & {
   webkitExitFullscreen?: () => Promise<void> | void
 }
 
-/** DevTools hotkeys blocked for candidates (legacy `app.js:1855`). */
+/** DevTools hotkeys blocked for candidates (legacy guard). */
 const DEVTOOLS_KEYS = ['I', 'i', 'J', 'j', 'C', 'c']
 
 const isFullscreen = ref(false)
