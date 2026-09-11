@@ -1,0 +1,40 @@
+# Traefik v3 static configuration.
+# Reverse proxy for the CKA lab platform: terminates TLS for the FastAPI app
+# (uvicorn on 127.0.0.1:3000), exposes a secured dashboard and Prometheus
+# metrics. The dynamic configuration (routers/services/middlewares/TLS) lives
+# in dynamic.yml and is loaded through the file provider below.
+
+entryPoints:
+  # Plain HTTP: redirect everything to HTTPS so the origin is always a secure
+  # context (required by the Keyboard Lock API).
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+
+  websecure:
+    address: ":443"
+
+providers:
+  file:
+    filename: /etc/traefik/dynamic.yml
+    watch: true
+
+api:
+  dashboard: true
+  insecure: false
+
+metrics:
+  prometheus:
+    addEntryPointsLabels: true
+    addServicesLabels: true
+    addRoutersLabels: true
+
+accessLog: {}
+
+log:
+  level: INFO
