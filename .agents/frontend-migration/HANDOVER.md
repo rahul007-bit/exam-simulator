@@ -512,6 +512,9 @@ fixes → P3 channel+actor tagging + replay tabs → P4 desktop terminal recordi
   Recreate with `desktop_mgr.stop_desktop(sid); start_desktop(sid)` (or start a
   new session). Verified end-to-end: `pubsub numsub notify:{sid}` = 1,
   publish receiver = 1, `xmessage` popup process present in the container.
+- **Native notifications:** admin alerts use `notify-send` (app "Exam", 15s)
+  rendered by `xfce4-notifyd` (installed in the image); `xmessage` is only a
+  fallback. Rebuild tag `cka-desktop:pre-notifyd`.
 
 ### Full redeploy (2026-09-11)
 - Redeployed the whole local state: `web/api/`, `core/` (all), rebuilt
