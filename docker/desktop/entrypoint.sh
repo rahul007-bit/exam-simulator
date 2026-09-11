@@ -116,6 +116,11 @@ done
 su - exam -c "DISPLAY=:1 vncconfig -nowin" &
 VNCCONFIG_PID=$!
 
+# Start the XFCE notification daemon so admin alerts render as native
+# notifications (notify-send) rather than a bare xmessage window.
+su - exam -c "DISPLAY=:1 xfce4-notifyd" &
+NOTIFYD_PID=$!
+
 # Start websockify on port 6080 for noVNC
 websockify --web=/usr/share/novnc 6080 localhost:5901 &
 

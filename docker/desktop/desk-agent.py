@@ -155,15 +155,30 @@ class DeskAgent:
     # --- Admin notifications (host -> desktop popup) ---
 
     def _show_desktop_notification(self, message: str):
-        try:
-            subprocess.Popen(
-                ["xmessage", "-center", "-title", "Exam notification", "-timeout", "15", message],
-                env=os.environ.copy(),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        except Exception:
-            pass
+        """Show a native XFCE notification (falls back to xmessage)."""
+        env = os.environ.copy()
+        candidates = [
+            [
+                "notify-send",
+                "-u",
+                "normal",
+                "-t",
+                "15000",
+                "-a",
+                "Exam",
+                "Exam notification",
+                message,
+            ],
+            ["xmessage", "-center", "-title", "Exam notification", "-timeout", "15", message],
+        ]
+        for cmd in candidates:
+            try:
+                subprocess.Popen(
+                    cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+                return
+            except Exception:
+                continue
 
     def start_notification_listener(self):
         def _listen():
