@@ -152,6 +152,45 @@ class DeskAgent:
         t = threading.Thread(target=_listen, daemon=True, name="InboundClipboard")
         t.start()
 
+    # --- Admin notifications (host -> desktop popup) ---
+
+    def _show_desktop_notification(self, message: str):
+        try:
+            subprocess.Popen(
+                ["xmessage", "-center", "-title", "Exam notification", "-timeout", "15", message],
+                env=os.environ.copy(),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            pass
+
+    def start_notification_listener(self):
+        def _listen():
+            try:
+                pubsub = self.r.pubsub()
+                channel = f"notify:{self.session_id}"
+                pubsub.subscribe(channel)
+                print(f"[DeskAgent] Subscribed to {channel} for admin notifications.")
+                while self.running:
+                    try:
+                        msg = pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                        if msg and msg.get("type") == "message":
+                            raw = msg.get("data", "")
+                            if isinstance(raw, bytes):
+                                raw = raw.decode("utf-8", "replace")
+                            parsed = json.loads(raw)
+                            text = parsed.get("message", "")
+                            if text:
+                                self._show_desktop_notification(text)
+                    except Exception:
+                        time.sleep(1.0)
+            except Exception:
+                pass
+
+        t = threading.Thread(target=_listen, daemon=True, name="NotifyListener")
+        t.start()
+
     def _set_x11_clipboard(self, text: str):
         """Pushes text into X11 CLIPBOARD and PRIMARY selections."""
         for sel in ("clipboard", "primary"):
@@ -637,7 +676,10 @@ def main():
     agent.start_outbound_clipboard_poller()
     agent.start_window_telemetry_poller()
     agent.start_browser_history_poller()
-    agent.start_key_input_monitor()
+    agent.start_notification_listener()
+    # Desktop terminal input/output is now captured by the recording wrapper
+    # (desk-terminal-record.py) that runs the in-desktop shell — the legacy
+    # X keystroke sniffer is retired to avoid double recording.
 
     print("[DeskAgent] Desktop agent running successfully.")
     agent.run_heartbeat_loop()

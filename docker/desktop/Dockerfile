@@ -66,8 +66,9 @@ RUN mkdir -p /usr/lib/firefox-esr/distribution && \
 
 # Copy desk-agent and entrypoint
 COPY desk-agent.py /usr/local/bin/desk-agent.py
+COPY desk-terminal-record.py /usr/local/bin/desk-terminal-record.py
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/desk-agent.py /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/desk-agent.py /usr/local/bin/desk-terminal-record.py /usr/local/bin/entrypoint.sh
 
 EXPOSE 5901 6080
 

@@ -123,8 +123,10 @@ websockify --web=/usr/share/novnc 6080 localhost:5901 &
 su - exam -c "DISPLAY=:1 SESSION_ID='${SESSION_ID:-default}' REDIS_HOST='${REDIS_HOST:-172.17.0.1}' REDIS_PORT='${REDIS_PORT:-6379}' /usr/local/bin/desk-agent.py" &
 AGENT_PID=$!
 
-# Launch XFCE Terminal & Firefox with Kubernetes Docs as user exam
-su - exam -c "DISPLAY=:1 xfce4-terminal" &
+# Launch XFCE Terminal & Firefox with Kubernetes Docs as user exam.
+# The terminal runs through the recording wrapper so its input/output is
+# captured as the `user-desktop` channel for replay.
+su - exam -c "DISPLAY=:1 SESSION_ID='${SESSION_ID:-default}' REDIS_HOST='${REDIS_HOST:-172.17.0.1}' REDIS_PORT='${REDIS_PORT:-6379}' xfce4-terminal -e '/usr/local/bin/desk-terminal-record.py'" &
 TERM_PID=$!
 
 su - exam -c "DISPLAY=:1 firefox-esr https://kubernetes.io/docs/home/" &
