@@ -26,6 +26,10 @@ class RedisBus:
         self._bytes_client: Optional[redis.Redis] = None
         self._async_client: Optional[aioredis.Redis] = None
         self._is_connected = False
+        self._mem_active_session_id: Optional[str] = None
+        self._mem_session_states: Dict[str, Dict[str, Any]] = {}
+        self._mem_active_sessions: set = set()
+        self._mem_user_active: Dict[str, str] = {}
 
     def is_available(self) -> bool:
         """Returns True if Redis server is reachable."""
@@ -102,6 +106,28 @@ class RedisBus:
             return True
         except Exception as e:
             print(f"[RedisBus] Failed async publish: {e}")
+            return False
+
+    def publish_notification(self, session_id: str, message: str) -> bool:
+        """Admin -> candidate notification.
+
+        Publishes to `notify:{sid}` (the in-desktop agent shows a popup) and to
+        the session channel (so the candidate web UI can surface it too).
+        """
+        if not self.is_available() or not session_id or not message:
+            return False
+        try:
+            client = self.get_sync_client()
+            payload = json.dumps({
+                "type": "admin_notification",
+                "message": message,
+                "timestamp": time.time(),
+            })
+            client.publish(f"notify:{session_id}", payload)
+            client.publish(f"session:{session_id}", payload)
+            return True
+        except Exception as e:
+            print(f"[RedisBus] Failed to publish notification: {e}")
             return False
 
     def set_clipboard(self, session_id: str, text: str) -> None:
@@ -199,79 +225,100 @@ class RedisBus:
             pass
 
     def is_session_active(self, session_id: str) -> bool:
-        """True only when the session is the genuinely registered active one.
+        """True when the session is a registered live session.
 
-        Guards auto-restore paths against stale state snapshots: after
-        submit/terminate the session must be considered dead even if an old
-        state blob (status "active") is still cached in Redis.
+        Multi-session (FS-003b): membership in `active_sessions` is the source of
+        truth, so several users can each have a live session simultaneously. The
+        legacy `session:active:id` pointer is not consulted here.
         """
-        if not self.is_available() or not session_id:
+        if not session_id:
             return False
+        if not self.is_available():
+            return session_id in self._mem_active_sessions
         try:
             client = self.get_sync_client()
-            if not client.sismember("active_sessions", session_id):
-                return False
-            active_id = client.get("session:active:id")
-            if isinstance(active_id, bytes):
-                active_id = active_id.decode()
-            return active_id == session_id
+            return bool(client.sismember("active_sessions", session_id))
         except Exception:
             return False
 
     # --- Terminal Output Buffer (Scrollback Replay on Reconnect) ---
 
-    def append_terminal_buffer(self, session_id: str, data: bytes, max_chunks: int = 200) -> None:
-        """Appends output chunk to session terminal ring buffer."""
+    def _terminal_key(self, session_id: str, channel: str) -> str:
+        return f"terminal:buffer:{session_id}:{channel}"
+
+    def append_terminal_buffer(
+        self, session_id: str, data: bytes, channel: str = "user-web", max_chunks: int = 200
+    ) -> None:
+        """Appends an output chunk to a per-channel terminal ring buffer.
+
+        TTL is long (2h) while the session is active and short (5 min) for
+        abandoned/idle channels; refreshed on every append.
+        """
         if not self.is_available() or not data:
             return
         try:
             client = self.get_bytes_client()
-            key = f"terminal:buffer:{session_id}"
+            key = self._terminal_key(session_id, channel)
             client.rpush(key, data)
             client.ltrim(key, -max_chunks, -1)
-            client.expire(key, 7200)
+            client.expire(key, 7200 if self.is_session_active(session_id) else 300)
         except Exception:
             pass
 
-    def get_terminal_buffer(self, session_id: str) -> list[bytes]:
-        """Retrieves terminal scrollback buffer for session reconnect."""
+    def get_terminal_buffer(self, session_id: str, channel: str = "user-web") -> list[bytes]:
+        """Retrieves a channel's scrollback buffer for reconnect."""
         if not self.is_available():
             return []
         try:
             client = self.get_bytes_client()
-            key = f"terminal:buffer:{session_id}"
-            return client.lrange(key, 0, -1) or []
+            return client.lrange(self._terminal_key(session_id, channel), 0, -1) or []
         except Exception:
             return []
 
-    def clear_terminal_buffer(self, session_id: str) -> None:
-        """Clears terminal buffer for session."""
+    def expire_terminal_buffer(self, session_id: str, channel: str, ttl: int) -> None:
+        """Sets a channel's buffer TTL (e.g. shorten on detach)."""
         if not self.is_available():
             return
         try:
-            client = self.get_sync_client()
-            client.delete(f"terminal:buffer:{session_id}")
+            self.get_sync_client().expire(self._terminal_key(session_id, channel), ttl)
+        except Exception:
+            pass
+
+    def clear_terminal_buffer(self, session_id: str, channel: str = "user-web") -> None:
+        """Clears a channel's terminal buffer."""
+        if not self.is_available():
+            return
+        try:
+            self.get_sync_client().delete(self._terminal_key(session_id, channel))
         except Exception:
             pass
 
     # --- In-Memory Session State Storage ---
 
     def set_session_state(self, session_id: str, state_dict: Dict[str, Any]) -> bool:
-        """Stores active session state in Redis."""
+        """Stores active session state in Redis, or in memory when Redis is unavailable."""
         if not self.is_available():
-            return False
+            self._mem_session_states[session_id] = state_dict
+            self._mem_active_session_id = session_id
+            self._mem_active_sessions.add(session_id)
+            return True
         try:
             client = self.get_sync_client()
             client.set(f"session:{session_id}", json.dumps(state_dict), ex=86400)
+            client.sadd("active_sessions", session_id)
+            # Legacy "most recent" pointer (CLI/tools only; never an ownership gate).
             client.set("session:active:id", session_id, ex=86400)
             return True
         except Exception:
             return False
 
     def get_session_state(self, session_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
-        """Retrieves session state from Redis."""
+        """Retrieves session state from Redis, or memory when Redis is unavailable."""
         if not self.is_available():
-            return None
+            sid = session_id or self._mem_active_session_id
+            if not sid:
+                return None
+            return self._mem_session_states.get(sid)
         try:
             client = self.get_sync_client()
             sid = session_id or client.get("session:active:id")
@@ -288,9 +335,9 @@ class RedisBus:
             return None
 
     def get_active_session_id(self) -> Optional[str]:
-        """Returns the current active session ID from Redis if set."""
+        """Returns the current active session ID from Redis or memory if set."""
         if not self.is_available():
-            return None
+            return self._mem_active_session_id
         try:
             client = self.get_sync_client()
             sid = client.get("session:active:id")
@@ -301,18 +348,83 @@ class RedisBus:
             return None
 
     def clear_session_state(self, session_id: Optional[str] = None) -> None:
-        """Clears session state and terminal buffer from Redis."""
+        """Clears session state and terminal buffer from Redis or memory."""
         if not self.is_available():
+            sid = session_id or self._mem_active_session_id
+            if sid:
+                self._mem_session_states.pop(sid, None)
+                self._mem_active_sessions.discard(sid)
+                if self._mem_active_session_id == sid:
+                    self._mem_active_session_id = None
             return
         try:
             client = self.get_sync_client()
             sid = session_id or client.get("session:active:id")
+            if isinstance(sid, bytes):
+                sid = sid.decode()
             if sid:
                 client.delete(f"session:{sid}")
                 client.delete(f"clipboard:{sid}")
                 client.delete(f"terminal:buffer:{sid}")
                 client.delete(f"desktop:{sid}")
-            client.delete("session:active:id")
+            client.srem("active_sessions", sid or session_id or "")
+            active_id = client.get("session:active:id")
+            if isinstance(active_id, bytes):
+                active_id = active_id.decode()
+            if not active_id or active_id == sid:
+                client.delete("session:active:id")
+        except Exception:
+            pass
+
+    def list_active_session_ids(self) -> list:
+        """Returns the ids of every registered live session."""
+        if not self.is_available():
+            return list(self._mem_active_sessions)
+        try:
+            client = self.get_sync_client()
+            members = client.smembers("active_sessions")
+            out = []
+            for m in members:
+                out.append(m.decode() if isinstance(m, bytes) else m)
+            return out
+        except Exception:
+            return []
+
+    def set_user_active_session(self, username: str, session_id: str) -> None:
+        """Marks the session a given user is currently running."""
+        if not username or not session_id:
+            return
+        if not self.is_available():
+            self._mem_user_active[username] = session_id
+            return
+        try:
+            self.get_sync_client().set(f"user:{username}:active_session", session_id, ex=86400)
+        except Exception:
+            pass
+
+    def get_user_active_session(self, username: str) -> Optional[str]:
+        """Returns the session a user is currently running, if any."""
+        if not username:
+            return None
+        if not self.is_available():
+            return self._mem_user_active.get(username)
+        try:
+            val = self.get_sync_client().get(f"user:{username}:active_session")
+            if isinstance(val, bytes):
+                val = val.decode()
+            return val or None
+        except Exception:
+            return None
+
+    def clear_user_active_session(self, username: str) -> None:
+        """Clears a user's active-session pointer."""
+        if not username:
+            return
+        if not self.is_available():
+            self._mem_user_active.pop(username, None)
+            return
+        try:
+            self.get_sync_client().delete(f"user:{username}:active_session")
         except Exception:
             pass
 
@@ -399,13 +511,21 @@ class RedisBus:
             # Write to history hash; keep for 30 days
             client.set(f"history:{session_id}", json.dumps(meta), ex=86400 * 30)
             client.zadd("session_history", {session_id: time.time()})
+            client.srem("active_sessions", session_id)
+            owner = meta.get("owner_username")
+            if owner:
+                current = client.get(f"user:{owner}:active_session")
+                if isinstance(current, bytes):
+                    current = current.decode()
+                if current == session_id:
+                    client.delete(f"user:{owner}:active_session")
             # Clean up active tracking keys
             for suffix in ["", ":last_active", ":kubeconfig", ":exam_md"]:
                 client.delete(f"session:{session_id}{suffix}")
             client.delete(f"desktop:{session_id}")
             client.delete(f"clipboard:{session_id}")
             client.delete(f"terminal:buffer:{session_id}")
-            # Remove from active id pointer if it matches
+            # Remove from the legacy active pointer if it matches
             active_id = client.get("session:active:id")
             if isinstance(active_id, bytes):
                 active_id = active_id.decode()
@@ -438,6 +558,8 @@ class RedisBus:
                             "total_tasks": data.get("total_tasks", 0) or len(data.get("question_ids", [])),
                             "time_limit_minutes": data.get("time_limit_minutes"),
                             "scorecard_summary": data.get("scorecard_summary"),
+                            "owner_username": data.get("owner_username"),
+                            "assigned_by": data.get("assigned_by"),
                         })
                     except Exception:
                         pass
@@ -502,11 +624,18 @@ class RedisBus:
         except Exception:
             pass
 
-    def create_invitation(self, token: str, preset: str) -> Dict[str, Any]:
-        """Creates a candidate invitation record in Redis."""
+    def create_invitation(self, token: str, preset: str, assigned_by: str = "", assigned_to: str = "") -> Dict[str, Any]:
+        """Creates a candidate invitation record in Redis.
+
+        ``assigned_to`` turns the invite into a user-bound assignment; both it
+        and ``assigned_by`` default to empty for backward compatibility with
+        plain candidate invitations.
+        """
         data = {
             "token": token,
             "preset": preset,
+            "assigned_by": assigned_by,
+            "assigned_to": assigned_to,
             "created_at": time.time(),
             "status": "pending",
         }
@@ -580,6 +709,28 @@ class RedisBus:
             client.srem("candidate_invitations", token)
         except Exception:
             pass
+
+    def list_assignments(self) -> list:
+        """Lists invitations bound to a named user (``assigned_to`` set)."""
+        try:
+            return [inv for inv in self.list_invitations() if inv.get("assigned_to")]
+        except Exception:
+            return []
+
+    def get_user_assignments(self, username: str) -> list:
+        """Lists invitations assigned to ``username``."""
+        if not username:
+            return []
+        try:
+            return [inv for inv in self.list_assignments() if inv.get("assigned_to") == username]
+        except Exception:
+            return []
+
+    def delete_assignment(self, token: str) -> None:
+        """Deletes an assignment record and its ``candidate_invitations`` membership."""
+        if not token:
+            return
+        self.delete_invitation(token)
 
     def get_max_concurrent_sessions(self) -> int:
         """Retrieves maximum allowed concurrent desktop sessions (default: 1)."""

@@ -17,6 +17,29 @@ from core.k3d_manager import k3d_mgr
 from core.incus_manager import incus_mgr
 from core.redis_bus import bus as redis_bus
 
+DEFAULT_K3D_CONTEXT = "k3d-cka"
+
+
+def provision_plan(contexts, kubeadm_context: Optional[str] = None) -> Dict[str, bool]:
+    """Decides which sandboxes a session actually needs, from its contexts.
+
+    - `kubeadm`: only when the kubeadm context is among the session contexts.
+    - `k3d`: when any non-kubeadm context is present (default when unknown).
+    - `desktop`: always (needed for VNC / terminal / browser capture).
+
+    A preset with both contexts returns both `k3d` and `kubeadm` True.
+    `contexts=None` preserves the legacy "provision everything" behaviour.
+    """
+    kubeadm_ctx = kubeadm_context or os.getenv("KUBEADM_CONTEXT", "kubeadm-vms")
+    if contexts is None:
+        return {"k3d": True, "kubeadm": True, "desktop": True}
+    ctxs = {str(c) for c in contexts if c}
+    if not ctxs:
+        return {"k3d": True, "kubeadm": False, "desktop": True}
+    needs_kubeadm = kubeadm_ctx in ctxs
+    needs_k3d = any(c != kubeadm_ctx for c in ctxs)
+    return {"k3d": needs_k3d, "kubeadm": needs_kubeadm, "desktop": True}
+
 
 class SandboxOrchestrator:
     def __init__(self):
@@ -147,21 +170,30 @@ class SandboxOrchestrator:
                 time.sleep(5)
         return verified
 
-    def provision_session(self, session_id: str, redis_host: str = "172.17.0.1") -> Dict[str, Any]:
-        """Provisions all sandboxes for an exam session with strict resource limits."""
-        print(f"[Orchestrator] Provisioning isolated sandbox for session: {session_id}", flush=True)
+    def provision_session(self, session_id: str, redis_host: str = "172.17.0.1", contexts=None) -> Dict[str, Any]:
+        """Provisions only the sandboxes the session's questions need.
 
-        # 1. Start Ephemeral k3d Cluster if enabled (ready in ~10-12s)
+        `contexts` is the session's `target_contexts`; when omitted the legacy
+        behaviour (k3d + desktop + kubeadm fleet) is kept.
+        """
+        plan = provision_plan(contexts)
+        print(
+            f"[Orchestrator] Provisioning sandbox for session: {session_id} "
+            f"(k3d={plan['k3d']}, kubeadm={plan['kubeadm']}, desktop={plan['desktop']})",
+            flush=True,
+        )
+
+        # 1. Start Ephemeral k3d Cluster if enabled and needed (ready in ~10-12s)
         enable_k3d = os.getenv("ENABLE_EPHEMERAL_K3D", "1").lower() in ("1", "true")
         k3d_ok = False
-        if enable_k3d and k3d_mgr.is_available():
+        if plan["k3d"] and enable_k3d and k3d_mgr.is_available():
             k3d_ok = k3d_mgr.create_ephemeral_cluster(session_id, redis_host=redis_host)
 
         # 2. Start Desktop Container with strict caps (ready in ~3s)
         desktop_ok = desktop_mgr.start_desktop(session_id, redis_host=redis_host)
 
-        # 3. If Incus microVMs are enabled, provision asynchronously in background thread
-        # This guarantees candidate UI launches in ~15 seconds without blocking for 2 minutes!
+        # 3. If Incus microVMs are enabled AND the session needs kubeadm, provision
+        # asynchronously in background (UI launches in ~15s without blocking).
         enable_microvms = os.getenv("ENABLE_MICROVMS", "1").lower() in ("1", "true")
         single_node = os.getenv("SINGLE_NODE", "0").lower() in ("1", "true")
 
@@ -199,7 +231,7 @@ class SandboxOrchestrator:
             finally:
                 self._fleet_threads.pop(session_id, None)
 
-        if enable_microvms and incus_mgr.is_available():
+        if plan["kubeadm"] and enable_microvms and incus_mgr.is_available():
             self._cancel_fleet.pop(session_id, None)
             fleet_thread = threading.Thread(target=_async_fleet_worker, daemon=True, name=f"fleet-bootstrap-{session_id}")
             self._fleet_threads[session_id] = fleet_thread
@@ -209,7 +241,7 @@ class SandboxOrchestrator:
             "session_id": session_id,
             "k3d_ready": k3d_ok,
             "desktop_ready": desktop_ok,
-            "microvms": "provisioning_in_background"
+            "microvms": "provisioning_in_background" if plan["kubeadm"] else "skipped",
         }
 
     def teardown_session(self, session_id: str) -> bool:
@@ -265,6 +297,7 @@ class SandboxOrchestrator:
         # 4. Cleanup Redis session info & tokens
         try:
             from core.redis_bus import bus as redis_bus
+
             if redis_bus.is_available():
                 # Deregister BEFORE key cleanup so auto-restore paths immediately
                 # treat this session as dead (prevents desktop resurrection).

@@ -33,15 +33,22 @@ class SessionRecorder:
         self.events_file: Optional[Path] = None
         self.meta_file: Optional[Path] = None
 
-        self._cast_fp = None
+        self._cast_fps: Dict[str, Any] = {}
+        self._cast_files: Dict[str, Path] = {}
         self._events_fp = None
         self._active = False
         self._cols = 120
         self._rows = 34
+        self._candidate = "exam"
         self._browser_thread: Optional[threading.Thread] = None
         self._browser_stop_event = threading.Event()
         self._last_browser_ts = 0
         self._input_buf: Dict[str, str] = {}
+        self._input_channel: Dict[str, str] = {}
+
+    @property
+    def _cast_fp(self):
+        return self._cast_fps.get("user-web")
 
     @property
     def is_active(self) -> bool:
@@ -69,34 +76,18 @@ class SessionRecorder:
             self._cols = cols
             self._rows = rows
             candidate = candidate_user or os.getenv("EXAM_USER", "exam")
+            self._candidate = candidate
 
-            self.cast_file = self.recordings_dir / f"{session_id}.cast"
+            self.cast_file = self.recordings_dir / f"{session_id}.user-web.cast"
             self.events_file = self.recordings_dir / f"{session_id}.events.jsonl"
             self.meta_file = self.recordings_dir / f"{session_id}.meta.json"
 
-            # Open asciinema cast file
-            self._cast_fp = open(self.cast_file, "a", encoding="utf-8", buffering=1)
-            
-            # Write asciinema v2 header if file is newly created
-            if self.cast_file.stat().st_size == 0:
-                header = {
-                    "version": 2,
-                    "width": cols,
-                    "height": rows,
-                    "timestamp": int(self.start_timestamp),
-                    "env": {
-                        "SHELL": os.getenv("SHELL", "/bin/bash"),
-                        "TERM": "xterm-256color",
-                        "USER": candidate,
-                    },
-                    "title": f"CKA Exam Session: {name} ({session_id})",
-                }
-                self._cast_fp.write(json.dumps(header) + "\n")
-                self._cast_fp.flush()
+            # Open the user-web asciinema cast (other channels open lazily)
+            self._active = True
+            self._ensure_cast_locked("user-web")
 
             # Open events jsonl file
             self._events_fp = open(self.events_file, "a", encoding="utf-8", buffering=1)
-            self._active = True
 
             # Write initial metadata file
             meta = {
@@ -145,8 +136,9 @@ class SessionRecorder:
             self._close_files_locked()
             self.session_id = session_id
             self.session_name = name
+            self._candidate = os.getenv("EXAM_USER", "exam")
 
-            self.cast_file = self.recordings_dir / f"{session_id}.cast"
+            self.cast_file = self.recordings_dir / f"{session_id}.user-web.cast"
             self.events_file = self.recordings_dir / f"{session_id}.events.jsonl"
             self.meta_file = self.recordings_dir / f"{session_id}.meta.json"
 
@@ -160,25 +152,10 @@ class SessionRecorder:
             else:
                 self.start_timestamp = time.time()
 
-            self._cast_fp = open(self.cast_file, "a", encoding="utf-8", buffering=1)
-            if self.cast_file.stat().st_size == 0:
-                header = {
-                    "version": 2,
-                    "width": self._cols,
-                    "height": self._rows,
-                    "timestamp": int(self.start_timestamp),
-                    "env": {
-                        "SHELL": os.getenv("SHELL", "/bin/bash"),
-                        "TERM": "xterm-256color",
-                        "USER": os.getenv("EXAM_USER", "exam"),
-                    },
-                    "title": f"CKA Exam Session: {name} ({session_id})",
-                }
-                self._cast_fp.write(json.dumps(header) + "\n")
-                self._cast_fp.flush()
+            self._active = True
+            self._ensure_cast_locked("user-web")
 
             self._events_fp = open(self.events_file, "a", encoding="utf-8", buffering=1)
-            self._active = True
             self._start_browser_tracker(candidate_user=os.getenv("EXAM_USER", "exam"))
             self._start_redis_event_subscriber(session_id)
 
@@ -187,9 +164,54 @@ class SessionRecorder:
             self.start_timestamp = time.time()
         return round(max(0.0, time.time() - self.start_timestamp), 6)
 
-    def record_output(self, data: Union[str, bytes]) -> None:
-        """Records terminal output in asciinema v2 format."""
-        if not self._active or not self._cast_fp:
+    def _write_cast_header_locked(self, fp) -> None:
+        header = {
+            "version": 2,
+            "width": self._cols,
+            "height": self._rows,
+            "timestamp": int(self.start_timestamp or time.time()),
+            "env": {
+                "SHELL": os.getenv("SHELL", "/bin/bash"),
+                "TERM": "xterm-256color",
+                "USER": self._candidate,
+            },
+            "title": f"CKA Exam Session: {self.session_name} ({self.session_id})",
+        }
+        fp.write(json.dumps(header) + "\n")
+        fp.flush()
+
+    def _ensure_cast_locked(self, channel: str):
+        """Lazily opens a channel's cast file and writes its asciinema v2 header."""
+        fp = self._cast_fps.get(channel)
+        if fp is not None and not fp.closed:
+            return fp
+        if not self._active or not self.session_id:
+            return None
+        path = self.recordings_dir / f"{self.session_id}.{channel}.cast"
+        try:
+            fp = open(path, "a", encoding="utf-8", buffering=1)
+        except Exception:
+            return None
+        self._cast_fps[channel] = fp
+        self._cast_files[channel] = path
+        if path.stat().st_size == 0:
+            self._write_cast_header_locked(fp)
+        if channel == "user-web":
+            self.cast_file = path
+        return fp
+
+    def _write_cast_record_locked(self, channel: str, record_line: str) -> None:
+        with self._lock:
+            fp = self._ensure_cast_locked(channel)
+            if fp and not fp.closed:
+                try:
+                    fp.write(record_line)
+                except Exception:
+                    pass
+
+    def record_output(self, data: Union[str, bytes], channel: str = "user-web") -> None:
+        """Records terminal output in asciinema v2 format for the given channel."""
+        if not self._active:
             return
 
         if isinstance(data, bytes):
@@ -202,13 +224,7 @@ class SessionRecorder:
 
         rel_time = self._get_rel_time()
         record_line = json.dumps([rel_time, "o", data_str]) + "\n"
-
-        with self._lock:
-            if self._cast_fp and not self._cast_fp.closed:
-                try:
-                    self._cast_fp.write(record_line)
-                except Exception:
-                    pass
+        self._write_cast_record_locked(channel, record_line)
 
     # --- Timeline-visible typed lines (aggregated keystrokes) ---
 
@@ -219,7 +235,7 @@ class SessionRecorder:
         """Strips ANSI escape/CSI sequences so arrow keys & colors don't pollute lines."""
         return re.sub(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b.", "", s)
 
-    def _process_input_for_events(self, actor: str, data_str: str) -> None:
+    def _process_input_for_events(self, actor: str, data_str: str, channel: str = "user-web") -> None:
         """Aggregates raw keystrokes into whole typed lines for the event timeline.
 
         Keeps a partial line buffered until Enter (or Ctrl-C/D) arrives, so the
@@ -243,10 +259,11 @@ class SessionRecorder:
         chunks = re.split(r"[\r\n]+", line)
         with self._lock:
             self._input_buf[actor] = chunks.pop()[-400:]
+            self._input_channel[actor] = channel
         for chunk in chunks:
-            self._log_input_line(actor, chunk)
+            self._log_input_line(actor, chunk, channel=channel)
 
-    def _log_input_line(self, actor: str, text: str) -> None:
+    def _log_input_line(self, actor: str, text: str, channel: str = "user-web") -> None:
         if not self._active or not text or not text.strip():
             return
         text = text[: self._INPUT_MAX_LINE]
@@ -256,7 +273,7 @@ class SessionRecorder:
             "text": text,
             "length": len(text),
             "preview": text[:50],
-        }, actor=actor)
+        }, actor=actor, channel=channel)
 
     def flush_input_buffer(self, actor: Optional[str] = None) -> None:
         """Flushes any partial typed line as an event (on detach or session end)."""
@@ -264,11 +281,12 @@ class SessionRecorder:
         for a in targets:
             with self._lock:
                 buf = self._input_buf.pop(a, "")
-            self._log_input_line(a, buf)
+                channel = self._input_channel.pop(a, "user-web")
+            self._log_input_line(a, buf, channel=channel)
 
-    def record_input(self, data: Union[str, bytes], actor: str = "candidate") -> None:
-        """Records terminal keystrokes / input with actor tagging."""
-        if not self._active or not self._cast_fp:
+    def record_input(self, data: Union[str, bytes], actor: str = "candidate", channel: str = "user-web") -> None:
+        """Records terminal keystrokes / input with actor and channel tagging."""
+        if not self._active:
             return
 
         if isinstance(data, bytes):
@@ -281,52 +299,34 @@ class SessionRecorder:
 
         rel_time = self._get_rel_time()
         record_line = json.dumps([rel_time, "i", data_str]) + "\n"
+        self._write_cast_record_locked(channel, record_line)
 
-        with self._lock:
-            if self._cast_fp and not self._cast_fp.closed:
-                try:
-                    self._cast_fp.write(record_line)
-                except Exception:
-                    pass
+        self._process_input_for_events(actor, data_str, channel=channel)
 
-        self._process_input_for_events(actor, data_str)
-
-    def record_resize(self, cols: int, rows: int) -> None:
-        """Records terminal resize event."""
-        if not self._active or not self._cast_fp:
+    def record_resize(self, cols: int, rows: int, channel: str = "user-web") -> None:
+        """Records a channel's terminal resize event."""
+        if not self._active:
             return
 
         self._cols = cols
         self._rows = rows
         rel_time = self._get_rel_time()
         record_line = json.dumps([rel_time, "r", f"{cols}x{rows}"]) + "\n"
+        self._write_cast_record_locked(channel, record_line)
 
-        with self._lock:
-            if self._cast_fp and not self._cast_fp.closed:
-                try:
-                    self._cast_fp.write(record_line)
-                except Exception:
-                    pass
-
-        self.log_event("TERMINAL_RESIZE", {"cols": cols, "rows": rows})
+        self.log_event("TERMINAL_RESIZE", {"cols": cols, "rows": rows}, channel=channel)
 
     def record_marker(self, marker_text: str) -> None:
         """Records an asciinema marker event."""
-        if not self._active or not self._cast_fp:
+        if not self._active:
             return
 
         rel_time = self._get_rel_time()
         record_line = json.dumps([rel_time, "m", marker_text]) + "\n"
+        self._write_cast_record_locked("user-web", record_line)
 
-        with self._lock:
-            if self._cast_fp and not self._cast_fp.closed:
-                try:
-                    self._cast_fp.write(record_line)
-                except Exception:
-                    pass
-
-    def log_event(self, event_type: str, data: Optional[Dict[str, Any]] = None, actor: str = "candidate") -> None:
-        """Appends a structured event to the event log with explicit actor tracking."""
+    def log_event(self, event_type: str, data: Optional[Dict[str, Any]] = None, actor: str = "candidate", channel: Optional[str] = None) -> None:
+        """Appends a structured event to the event log with explicit actor and channel tracking."""
         rel_time = self._get_rel_time()
         now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -339,6 +339,8 @@ class SessionRecorder:
             "session_id": self.session_id,
             "data": data or {},
         }
+        if channel:
+            event_payload["channel"] = channel
 
         if event_type in ("SESSION_START", "TASK_DEPLOYED", "TASK_FLAGGED", "TASK_UNFLAGGED", "TASK_EVALUATION", "EXAM_SUBMITTED"):
             marker_summary = f"[{event_type}]"
@@ -420,13 +422,14 @@ class SessionRecorder:
     def _close_files_locked(self) -> None:
         self._stop_browser_tracker()
         self._stop_redis_event_subscriber()
-        if self._cast_fp:
+        for fp in list(self._cast_fps.values()):
             try:
-                self._cast_fp.flush()
-                self._cast_fp.close()
+                fp.flush()
+                fp.close()
             except Exception:
                 pass
-            self._cast_fp = None
+        self._cast_fps.clear()
+        self._cast_files.clear()
 
         if self._events_fp:
             try:
@@ -504,7 +507,16 @@ class SessionRecorder:
                                 raw = raw.decode("utf-8", errors="replace")
                             payload = json.loads(raw)
                             event_type = payload.pop("event", "DESKTOP_EVENT")
-                            self.log_event(event_type, payload)
+                            if event_type == "DESKTOP_TERMINAL_OUTPUT":
+                                self.record_output(payload.get("data", ""), channel="user-desktop")
+                            elif event_type == "DESKTOP_TERMINAL_INPUT":
+                                self.record_input(
+                                    payload.get("text", ""), actor="user", channel="user-desktop"
+                                )
+                            elif event_type.startswith("DESKTOP_"):
+                                self.log_event(event_type, payload, actor="user", channel="user-desktop")
+                            else:
+                                self.log_event(event_type, payload)
                     except Exception:
                         time.sleep(1.0)
             except Exception:
@@ -666,16 +678,16 @@ class SessionRecorder:
                     data = json.load(f)
 
                 session_id = data.get("session_id", meta_file.name.replace(".meta.json", ""))
-                cast_file = self.recordings_dir / f"{session_id}.cast"
+                cast_file = self.get_cast_path(session_id, "user-web")
                 events_file = self.recordings_dir / f"{session_id}.events.jsonl"
 
-                cast_size = cast_file.stat().st_size if cast_file.exists() else 0
+                cast_size = cast_file.stat().st_size if cast_file and cast_file.exists() else 0
                 events_count = 0
                 if events_file.exists():
                     with open(events_file, "r", encoding="utf-8") as ef:
                         events_count = sum(1 for _ in ef)
 
-                data["has_cast"] = cast_file.exists()
+                data["has_cast"] = bool(cast_file and cast_file.exists())
                 data["cast_size_bytes"] = cast_size
                 data["cast_size_human"] = self._human_size(cast_size)
                 data["has_events"] = events_file.exists()
@@ -689,10 +701,10 @@ class SessionRecorder:
     def get_recording(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Loads complete metadata and event summary for a session."""
         meta_path = self.recordings_dir / f"{session_id}.meta.json"
-        cast_path = self.recordings_dir / f"{session_id}.cast"
+        user_web_cast = self.get_cast_path(session_id, "user-web")
         events_path = self.recordings_dir / f"{session_id}.events.jsonl"
 
-        if not meta_path.exists() and not cast_path.exists() and not events_path.exists():
+        if not meta_path.exists() and not (user_web_cast and user_web_cast.exists()) and not events_path.exists():
             return None
 
         meta = {}
@@ -716,11 +728,33 @@ class SessionRecorder:
         meta["session_id"] = session_id
         meta["events"] = events
         meta["events_count"] = len(events)
-        meta["has_cast"] = cast_path.exists()
-        meta["cast_size_bytes"] = cast_path.stat().st_size if cast_path.exists() else 0
+        meta["has_cast"] = bool(user_web_cast and user_web_cast.exists())
+        meta["cast_size_bytes"] = user_web_cast.stat().st_size if user_web_cast and user_web_cast.exists() else 0
+        meta["channels"] = self._list_channels(session_id)
         meta["task_timeline"] = self._build_task_timeline(events, scorecard=meta.get("scorecard"))
 
         return meta
+
+    def _list_channels(self, session_id: str) -> List[Dict[str, Any]]:
+        """Lists cast channels that exist for a session (legacy cast => user-web)."""
+        channels: List[Dict[str, Any]] = []
+        for channel in ("user-web", "admin-web", "user-desktop"):
+            per_channel = self.recordings_dir / f"{session_id}.{channel}.cast"
+            if per_channel.exists():
+                channels.append({
+                    "id": channel,
+                    "has_cast": True,
+                    "cast_size_bytes": per_channel.stat().st_size,
+                })
+        if not any(c["id"] == "user-web" for c in channels):
+            legacy = self.recordings_dir / f"{session_id}.cast"
+            if legacy.exists():
+                channels.insert(0, {
+                    "id": "user-web",
+                    "has_cast": True,
+                    "cast_size_bytes": legacy.stat().st_size,
+                })
+        return channels
 
     def get_events(self, session_id: str) -> List[Dict[str, Any]]:
         events_path = self.recordings_dir / f"{session_id}.events.jsonl"
@@ -733,10 +767,15 @@ class SessionRecorder:
                     events.append(json.loads(line))
         return events
 
-    def get_cast_path(self, session_id: str) -> Optional[Path]:
-        cast_path = self.recordings_dir / f"{session_id}.cast"
-        if cast_path.exists():
-            return cast_path
+    def get_cast_path(self, session_id: str, channel: str = "user-web") -> Optional[Path]:
+        """Returns a channel's cast path, falling back to the legacy user-web cast."""
+        per_channel = self.recordings_dir / f"{session_id}.{channel}.cast"
+        if per_channel.exists():
+            return per_channel
+        if channel == "user-web":
+            legacy = self.recordings_dir / f"{session_id}.cast"
+            if legacy.exists():
+                return legacy
         return None
 
     def _build_task_timeline(self, events: List[Dict[str, Any]], scorecard: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
@@ -1085,13 +1124,12 @@ class SessionRecorder:
         if session_id:
             self.attach_or_resume(session_id)
 
-        # If not already attached, auto-detect active session from var/session.json
+        # If not already attached, auto-detect active session from the session store
         if not self._active:
             try:
-                session_file = Path(__file__).parent.parent / "var" / "session.json"
-                if session_file.exists():
-                    with open(session_file, "r", encoding="utf-8") as f:
-                        sdata = json.load(f)
+                from core.redis_bus import bus as redis_bus
+                sdata = redis_bus.get_session_state()
+                if sdata:
                     sid = sdata.get("session_id")
                     sname = sdata.get("name", "Exam Session")
                     if sid:

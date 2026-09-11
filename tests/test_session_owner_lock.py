@@ -1,17 +1,17 @@
-"""Unit tests for the soft per-session owner lock (web/server.py).
+"""Unit tests for the soft per-session owner lock (web/api/owner_lock.py).
 
-These tests deliberately do NOT import `fastapi` or `web.server` at module
-import time: the server module pulls in host-only dependencies that are not
+These tests deliberately do NOT import `fastapi` or `web.api.owner_lock` at
+module import time: the package pulls in host-only dependencies that are not
 available on a Windows dev box. Instead the pure owner-lock helpers are
 extracted from the source with `ast` and executed with a fake Redis bus. The
-decision logic under test is exactly the code shipped in web/server.py.
+decision logic under test is exactly the code shipped in web/api/owner_lock.py.
 """
 import ast
 import unittest
 from pathlib import Path
 from typing import Optional
 
-SERVER = Path(__file__).resolve().parents[1] / "web" / "server.py"
+SERVER = Path(__file__).resolve().parents[1] / "web" / "api" / "owner_lock.py"
 
 _HELPER_NAMES = {
     "_owner_decision",

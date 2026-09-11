@@ -74,13 +74,17 @@ class FrontendCutoverTest(unittest.TestCase):
                         hits.append(f"{fp.relative_to(REPO)}: {token}")
         self.assertEqual([], hits, "legacy references remain:\n" + "\n".join(hits))
 
-    def test_server_source_cutover(self):
-        source = (REPO / "web" / "server.py").read_text(encoding="utf-8")
-        self.assertNotIn("STATIC_DIR", source)
-        self.assertNotIn("web/static", source)
+    def test_spa_source_cutover(self):
+        # The SPA serving routes live in web/api/routes/spa.py since the
+        # backend modularization; the facade keeps only app assembly.
+        facade = (REPO / "web" / "server.py").read_text(encoding="utf-8")
+        self.assertNotIn("STATIC_DIR", facade)
+        self.assertNotIn("web/static", facade)
+        self.assertIn("create_app", facade)
+        source = (REPO / "web" / "api" / "routes" / "spa.py").read_text(encoding="utf-8")
         self.assertNotIn("admin.html", source)
         self.assertIn("SPA_INDEX", source)
-        self.assertIn('@app.get("/admin"', source)
+        self.assertIn('@router.get("/admin"', source)
 
     @unittest.skipIf(os.name == "nt", "host-only (Unix pty/termios)")
     def test_serves_spa_routes_host_only(self):

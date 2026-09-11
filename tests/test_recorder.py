@@ -38,7 +38,7 @@ class TestSessionRecorder(unittest.TestCase):
         self.assertEqual(self.recorder.session_id, session_id)
 
         # Check cast file header
-        cast_path = self.recordings_path / f"{session_id}.cast"
+        cast_path = self.recordings_path / f"{session_id}.user-web.cast"
         self.assertTrue(cast_path.exists())
         with open(cast_path, "r", encoding="utf-8") as f:
             first_line = f.readline()
@@ -86,7 +86,7 @@ class TestSessionRecorder(unittest.TestCase):
 
         self.recorder.close()
 
-        cast_path = self.recordings_path / f"{session_id}.cast"
+        cast_path = self.recordings_path / f"{session_id}.user-web.cast"
         with open(cast_path, "r", encoding="utf-8") as f:
             lines = [json.loads(line.strip()) for line in f if line.strip()]
 
@@ -196,9 +196,14 @@ class TestSessionRecorder(unittest.TestCase):
         self.assertIn("session-b", session_ids)
 
     def test_deployer_integration_with_recorder(self):
+        from unittest.mock import patch
+        from core.redis_bus import bus as redis_bus
         session_file = self.recordings_path / "test_session.json"
         sets_dir = self.recordings_path / "sets"
         deployer = LabDeployer(session_file=session_file, sets_dir=sets_dir)
+        deployer._cleanup_cluster_resources = lambda *args, **kwargs: None
+        redis_bus._mem_session_states = {}
+        redis_bus._mem_active_session_id = None
 
         q1 = Question(
             id="TR-TEST-1",
@@ -222,27 +227,31 @@ class TestSessionRecorder(unittest.TestCase):
         )
 
         # Deploy sequential exam
-        session = deployer.deploy_sequential([q1, q2], session_name="Integration Exam")
-        self.assertIsNotNone(session)
-        self.assertEqual(session.current_index, 0)
+        with patch.object(redis_bus, "is_available", return_value=False), \
+             patch.object(redis_bus, "get_sync_client", return_value=None):
+            session = deployer.deploy_sequential([q1, q2], session_name="Integration Exam")
+            self.assertIsNotNone(session)
+            self.assertEqual(session.current_index, 0)
 
-        # Deploy next step
-        deployer.deploy_step(session, 1)
-        self.assertEqual(session.current_index, 1)
+            # Deploy next step
+            deployer.deploy_step(session, 1)
+            self.assertEqual(session.current_index, 1)
 
-        # Clear session
-        deployer.clear_session(cleanup_cluster=False)
-        self.assertFalse(session_file.exists())
+            # Clear session
+            deployer.clear_session(cleanup_cluster=False)
+            self.assertIsNone(redis_bus.get_active_session_id())
+            self.assertIsNone(redis_bus.get_session_state())
+            self.assertFalse(session_file.exists())
 
     def test_web_recording_endpoints(self):
-        from web.server import (
+        from web.api.routes.recordings import (
             list_recordings_endpoint,
             get_recording_detail_endpoint,
             get_recording_cast_endpoint,
             get_recording_events_endpoint,
             log_client_event_endpoint,
-            ClientEventRequest,
         )
+        from web.api.schemas import ClientEventRequest
 
         session_id = "test-web-session"
         from core.recorder import recorder as global_recorder
@@ -283,7 +292,7 @@ class TestSessionRecorder(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.recorder.finish_session(session_id)
 
-        cast_file = self.recordings_path / f"{session_id}.cast"
+        cast_file = self.recordings_path / f"{session_id}.user-web.cast"
         self.assertTrue(cast_file.exists())
         with open(cast_file, "r", encoding="utf-8") as f:
             content = f.read()

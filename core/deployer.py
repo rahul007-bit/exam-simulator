@@ -16,33 +16,39 @@ SYSTEM_NAMESPACES = {"default", "kube-system", "kube-public", "kube-node-lease",
 class LabDeployer:
     def __init__(self, session_file: Optional[Path] = None, sets_dir: Optional[Path] = None):
         self.session_file = session_file or (Path(__file__).parent.parent / "var" / "session.json")
-        self.session_file.parent.mkdir(parents=True, exist_ok=True)
         self.sets_dir = sets_dir or (Path(__file__).parent.parent / "sets")
         self.sets_dir.mkdir(parents=True, exist_ok=True)
 
-    def load_active_session(self, loader: QuestionLoader) -> Optional[ExamSession]:
-        data = None
+    def _read_legacy_session(self) -> Optional[Dict[str, Any]]:
+        """One-time read of a legacy session file, renamed to .migrated afterwards."""
+        if not self.session_file or not self.session_file.exists():
+            return None
         try:
-            from core.redis_bus import bus as redis_bus
-            data = redis_bus.get_session_state()
+            with open(self.session_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            print(f"[Warning] Failed to parse active session: {e}")
+            return None
+        try:
+            migrated = self.session_file.with_name(self.session_file.name + ".migrated")
+            self.session_file.rename(migrated)
         except Exception:
-            data = None
+            pass
+        try:
+            session_id = data.get("session_id")
+            if session_id:
+                from core.redis_bus import bus as redis_bus
+                redis_bus.set_session_state(session_id, data)
+        except Exception:
+            pass
+        return data
 
-        if data is None:
-            if not self.session_file.exists():
-                return None
-            try:
-                with open(self.session_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-            except Exception as e:
-                print(f"[Warning] Failed to parse active session: {e}")
+    def _session_from_state(self, data: Optional[Dict[str, Any]], loader: QuestionLoader) -> Optional[ExamSession]:
         if not data:
             return None
-
         # Do not return completed or archived sessions as active
         if data.get("status") in ("completed", "submitted", "terminated", "replaced"):
             return None
-
         try:
             q_ids = data.get("question_ids", [])
             questions = [loader.get(qid) for qid in q_ids if loader.get(qid) is not None]
@@ -62,10 +68,37 @@ class LabDeployer:
                 status=data.get("status", "active"),
                 last_active_at=data.get("last_active_at"),
                 candidate_token=data.get("candidate_token"),
+                owner_username=data.get("owner_username"),
+                assigned_by=data.get("assigned_by"),
             )
         except Exception as e:
             print(f"[Warning] Failed to parse active session: {e}")
             return None
+
+    def load_session(self, loader: QuestionLoader, session_id: str) -> Optional[ExamSession]:
+        """Loads a specific session by id (FS-003b: per-session resolution)."""
+        if not session_id:
+            return None
+        try:
+            from core.redis_bus import bus as redis_bus
+            data = redis_bus.get_session_state(session_id)
+        except Exception:
+            data = None
+        return self._session_from_state(data, loader)
+
+    def load_active_session(self, loader: QuestionLoader) -> Optional[ExamSession]:
+        """Legacy: the most-recent global session (pointer). Prefer
+        `load_session` / contextual resolution for concurrent sessions."""
+        data = None
+        try:
+            from core.redis_bus import bus as redis_bus
+            data = redis_bus.get_session_state()
+        except Exception:
+            data = None
+
+        if data is None:
+            data = self._read_legacy_session()
+        return self._session_from_state(data, loader)
 
     def save_session(self, session: ExamSession) -> None:
         data = session.to_dict()
@@ -74,12 +107,15 @@ class LabDeployer:
             redis_bus.set_session_state(session.session_id, data)
         except Exception:
             pass
-        with open(self.session_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
 
-    def clear_active_session(self) -> None:
+    def clear_active_session(self, session_id: Optional[str] = None) -> None:
         try:
-            if self.session_file.exists():
+            from core.redis_bus import bus as redis_bus
+            redis_bus.clear_session_state(session_id)
+        except Exception:
+            pass
+        try:
+            if self.session_file and self.session_file.exists():
                 self.session_file.unlink(missing_ok=True)
         except Exception:
             pass
@@ -157,19 +193,17 @@ class LabDeployer:
         return md_file
 
     def clear_session(self, cleanup_cluster: bool = True) -> None:
+        active_sid = None
         try:
             from core.redis_bus import bus as redis_bus
-            client = redis_bus.get_sync_client()
-            if client:
-                old_sid = client.get("session:active:id")
-                if old_sid:
-                    sid_str = old_sid.decode() if isinstance(old_sid, bytes) else old_sid
-                    from core.desktop_manager import desktop_mgr
-                    desktop_mgr.stop_desktop(sid_str)
-            redis_bus.clear_session_state()
+            active_sid = redis_bus.get_active_session_id()
+            if active_sid:
+                from core.desktop_manager import desktop_mgr
+                desktop_mgr.stop_desktop(active_sid)
         except Exception:
-            pass
-        if self.session_file.exists():
+            active_sid = None
+
+        if active_sid:
             try:
                 recorder.log_event("SESSION_RESET", {"cleanup_cluster": cleanup_cluster})
                 recorder.close()
@@ -177,7 +211,18 @@ class LabDeployer:
                 pass
             if cleanup_cluster:
                 self._cleanup_cluster_resources()
-            self.session_file.unlink()
+
+        try:
+            from core.redis_bus import bus as redis_bus
+            redis_bus.clear_session_state()
+        except Exception:
+            pass
+
+        try:
+            if self.session_file and self.session_file.exists():
+                self.session_file.unlink()
+        except Exception:
+            pass
 
         active_file = self.sets_dir / "active_exam.md"
         if active_file.exists():
@@ -189,12 +234,11 @@ class LabDeployer:
     def _cleanup_cluster_resources(self, questions: Optional[List[Question]] = None, exclude_namespace: Optional[str] = None) -> None:
         """Purges test-created namespaces, webhooks, and iptables rules from target contexts."""
         data = None
-        if self.session_file.exists():
-            try:
-                with open(self.session_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-            except Exception:
-                data = None
+        try:
+            from core.redis_bus import bus as redis_bus
+            data = redis_bus.get_session_state()
+        except Exception:
+            data = None
 
         SYSTEM_NAMESPACES = {"default", "kube-system", "kube-public", "kube-node-lease", "metallb-system", "local-path-storage"}
         loader = QuestionLoader()

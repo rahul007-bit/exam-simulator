@@ -3,6 +3,8 @@
 __pycache__/
 *.pyc
 var/
+recordings/
+reports/
 .pytest_cache/
 .worktrees/
 docker/desktop/kubectl

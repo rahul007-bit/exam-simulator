@@ -143,6 +143,8 @@ class ExamSession:
     status: str = "active"          # "active" | "completed" | "expired" | "idle_timeout"
     last_active_at: Optional[str] = None  # ISO8601 UTC of last candidate activity
     candidate_token: Optional[str] = None  # Unique per-candidate URL token
+    owner_username: Optional[str] = None  # User account that owns this session
+    assigned_by: Optional[str] = None  # Admin/user that assigned this session
 
     @property
     def current_question(self) -> Optional[Question]:
@@ -166,5 +168,7 @@ class ExamSession:
             "status": self.status,
             "last_active_at": self.last_active_at,
             "candidate_token": self.candidate_token,
+            "owner_username": self.owner_username,
+            "assigned_by": self.assigned_by,
         }
 
