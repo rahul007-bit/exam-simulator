@@ -1840,6 +1840,32 @@
       "evidence": ".agents/FS-003b-opencode/EVIDENCE.md",
       "notes": "FS-003 retires var/session.json and records ownership; multi-session is deferred here. Depends on FS-004 assignment.",
       "tests": []
+    },
+    {
+      "id": "FS-009",
+      "kind": "future",
+      "phase": "Future (FS)",
+      "milestone": null,
+      "title": "Per-terminal channel recording, conditional provisioning and admin notifications",
+      "depends": [
+        "FS-003b"
+      ],
+      "owner": "opencode",
+      "status": "verified",
+      "verifier": null,
+      "deliverable": "per-channel terminal recording (user-web/admin-web/user-desktop) with channel-filtered replay, context-conditional sandbox provisioning, and admin -> candidate desktop notifications",
+      "acceptance": [
+        "desktop terminal input+output recorded and replayable",
+        "replay filters events per channel (User Web/Desktop, Admin)",
+        "admin notification appears as a native desktop popup",
+        "only the sandboxes a session needs are provisioned"
+      ],
+      "verification": [
+        "unit tests + host smoke"
+      ],
+      "evidence": ".agents/FS-009-opencode/EVIDENCE.md",
+      "notes": "Delivered alongside FS-003b (P1-P4 plan in HANDOVER). Notification via notify-send/xfce4-notifyd; image tags pre-p4/pre-notify/pre-notifyd.",
+      "tests": []
     }
   ]
 }

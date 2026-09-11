@@ -137,3 +137,21 @@ Append-only decision log. Each entry: what, why, alternatives considered, status
 - **Out of scope:** per-session X11 clipboard monitor stays host-global (one
   management display); it is a known limitation, not a concurrency blocker.
 - **Status:** accepted.
+
+## D-013 — Terminal channels, desktop recording and admin notifications
+- **Channels:** `user-web`, `admin-web`, `user-desktop`; every recorded frame
+  and event carries `channel` + `actor`. Admin desktop VNC is **view-only**;
+  the admin web terminal stays a live shell but with **no candidate scrollback
+  and no buffer** (own channel).
+- **Recording:** the in-desktop terminal is recorded by a pty wrapper
+  (`desk-terminal-record.py`) that publishes input+output as `user-desktop`,
+  replacing the `xinput` keystroke sniffer. Replay has a `User` dropdown
+  (Web/Desktop) beside an `Admin` tab, filters events by channel on a shared
+  clock, and dropped the `.cast` download.
+- **Provisioning:** only the sandboxes a session needs are created
+  (`provision_plan`); desktop always.
+- **Notifications:** admin → candidate alerts are published to `notify:{sid}`
+  and shown as a **native XFCE notification** (`notify-send` via
+  `xfce4-notifyd`), with `xmessage` only as a fallback. Desktop-image changes
+  apply only to newly created containers (recreate or start a new session).
+- **Status:** accepted.

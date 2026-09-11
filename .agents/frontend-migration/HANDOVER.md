@@ -514,7 +514,11 @@ fixes → P3 channel+actor tagging + replay tabs → P4 desktop terminal recordi
   publish receiver = 1, `xmessage` popup process present in the container.
 - **Native notifications:** admin alerts use `notify-send` (app "Exam", 15s)
   rendered by `xfce4-notifyd` (installed in the image); `xmessage` is only a
-  fallback. Rebuild tag `cka-desktop:pre-notifyd`.
+  fallback. Rebuild tag `cka-desktop:pre-notifyd`. The explicit `xfce4-notifyd`
+  line in `entrypoint.sh` is redundant (the session autostarts it) but left in
+  intentionally.
+- **Board:** FS-009 tracks this body of work (verified); decisions D-012/D-013
+  record the channel + notification design.
 
 ### Full redeploy (2026-09-11)
 - Redeployed the whole local state: `web/api/`, `core/` (all), rebuilt
