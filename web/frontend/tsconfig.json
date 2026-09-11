@@ -14,9 +14,8 @@
     "resolveJsonModule": true,
     "useDefineForClassFields": true,
     "verbatimModuleSyntax": true,
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"]
     }
   },
   "include": [
