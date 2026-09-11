@@ -2,7 +2,7 @@
 
 > GENERATED FILE - do not edit by hand.
 > Canonical data: `.agents/frontend-migration/tasks.json`.
-> Regenerate with `python scripts/agents_board.py`. Last generated: 2026-09-11T07:24:59Z.
+> Regenerate with `python scripts/agents_board.py`. Last generated: 2026-09-11T12:58:43Z.
 
 **Program:** `frontend-migration`  
 **Branch:** `feature/frontend-vue-migration`  
@@ -11,13 +11,13 @@
 
 | Status | Count |
 | :--- | ---: |
-| todo | 14 |
+| todo | 6 |
 | claimed | 0 |
-| in-review | 0 |
-| verified | 32 |
+| in-review | 1 |
+| verified | 40 |
 | blocked | 0 |
 | rejected | 0 |
-| **total** | **46** |
+| **total** | **47** |
 
 ## Milestones
 
@@ -98,14 +98,15 @@
 
 | ID | Title | Depends | Owner | Status | Verifier | Evidence |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `FS-001` | Auth backend (users, roles, hashing, login/logout) | FE-004 | - | todo | - | - |
-| `FS-002` | Auth frontend (/login, auth store, guards) | FS-001 | - | todo | - | - |
-| `FS-003` | Session ownership model | FS-001 | - | todo | - | - |
-| `FS-004` | Admin assigns exam to user | FS-003 | - | todo | - | - |
-| `FS-005` | User dashboard (own exams only) | FS-002, FS-004 | - | todo | - | - |
-| `FS-006` | Dynamic preset generator API | FE-004 | - | todo | - | - |
-| `FS-007` | Custom exam builder UI | FS-006 | - | todo | - | - |
-| `FS-008` | Hide preset catalog from non-admin users | FS-002 | - | todo | - | - |
+| `FS-001` | Auth backend (users, roles, hashing, login/logout) | FE-004 | opencode | verified | - | .agents/FS-001-opencode/EVIDENCE.md |
+| `FS-002` | Auth frontend (/login, auth store, guards) | FS-001 | opencode | verified | - | .agents/FS-002-opencode/EVIDENCE.md |
+| `FS-003` | Session ownership model | FS-001 | opencode | verified | - | .agents/FS-003-opencode/EVIDENCE.md |
+| `FS-004` | Admin assigns exam to user | FS-003 | opencode | verified | - | .agents/FS-004-opencode/EVIDENCE.md |
+| `FS-005` | User dashboard (own exams only) | FS-002, FS-004 | opencode | verified | - | .agents/FS-005-opencode/EVIDENCE.md |
+| `FS-006` | Dynamic preset generator API | FE-004 | opencode | verified | - | .agents/FS-006-opencode/EVIDENCE.md |
+| `FS-007` | Custom exam builder UI | FS-006 | opencode | verified | - | .agents/FS-007-opencode/EVIDENCE.md |
+| `FS-008` | Hide preset catalog from non-admin users | FS-002 | opencode | verified | - | .agents/FS-008-opencode/EVIDENCE.md |
+| `FS-003b` | Concurrent per-user sessions (multi-session) | FS-003, FS-004 | - | in-review | - | .agents/FS-003b-opencode/EVIDENCE.md |
 
 ## Acceptance criteria
 
@@ -758,3 +759,13 @@
   - API authorization enforced
 - **Verification:**
   - `authorization tests`
+
+### FS-003b - Concurrent per-user sessions (multi-session)
+
+- **Deliverable:** true per-user concurrent active sessions (each user owns an independent session); remove the single-active-session assumption from terminal/VNC/reaper resolution
+- **Depends on:** FS-003, FS-004
+- **Acceptance:**
+  - two users run exams concurrently
+  - terminal/VNC resolve per session, not session:active:id
+- **Verification:**
+  - `concurrency integration test`

@@ -66,3 +66,74 @@ Append-only decision log. Each entry: what, why, alternatives considered, status
 - **Consequence:** routes `/login`, `/dashboard`, `/exam/:sessionId` and an `auth`
   store are stubbed/considered now; `FS-*` tasks live in the board backlog.
 - **Status:** accepted.
+
+## D-010 — FS backlog design + catalog visibility is API-enforced
+- **What:** decisions for the FS tasks (2026-09-11, user-confirmed):
+  - Users/roles live in **Redis** (hash per user + role claim), matching the
+    existing sessions/invitations/owner-lock pattern; k8s multi-replica-safe.
+  - Password hashing: **stdlib `hashlib.pbkdf2_hmac`** (sha256, per-user salt) —
+    no new host pip dependencies.
+  - Login sessions: **opaque token in Redis + httponly cookie** (same pattern as
+    `admin_token`), trivially revocable.
+  - FS-001 (auth backend) and FS-006 (dynamic preset generator) run as one
+    parallel batch — disjoint modules.
+- **Catalog visibility clarification (feeds FS-008):** PLAN.md §"Hidden catalog"
+  and FS-008's acceptance are strengthened as follows — **enumeration is
+  admin-only at the API level**: `GET /api/presets` and `GET /api/questions`
+  (full catalog/listing) must require an authenticated **admin** role once
+  FS-001/FS-002 land. Non-admin users may only ever receive: their assigned
+  preset/session (via invitation token / session payload), and the generated
+  session from FS-006 — never an enumerable catalog or question list. Until
+  FS-008 is implemented, `GET /api/presets` remains public (parity with the
+  legacy UI); FS-008's verification must include authorization tests for both
+  endpoints.
+- **Status:** accepted.
+
+## D-011 — FS-004 / FS-007 design (assignment + builder)
+- **What:**
+  - **Assignments are user-bound invitations.** FS-004 reuses the existing
+    invitation/token flow instead of a new store: an invitation record gains
+    `assigned_to` (username) and `assigned_by` (admin). New endpoints:
+    `POST/GET /api/admin/assignments` (admin), `DELETE
+    /api/admin/assignments/{id}` (admin), `GET /api/assignments` (current user,
+    from the auth session). This keeps one source of truth and lets FS-005's
+    dashboard list a user's own assignments.
+  - **FS-007 custom exam builder** is an admin surface (`PresetBuilder.vue`)
+    calling `POST /api/presets/generate` (FS-006): count + optional difficulty
+    + optional domains; it starts a session and never lists questions.
+  - New-route registration, `AdminView.vue` wiring, and `openapi.json` updates
+    are owned by the orchestrator to keep the parallel batch conflict-free.
+- **Amendment (2026-09-11):** the user dashboard route is **`/assignments`**, not
+  `/dashboard` — Traefik already owns `PathPrefix('/dashboard')` for its own
+  secured dashboard, so the SPA route would be shadowed. Also, the candidate
+  route now requires sign-in unless an invitation `?token=` is present.
+- **Status:** accepted.
+
+## D-012 — FS-003b concurrent per-user sessions
+- **What:** remove the single-active-session assumption. Sessions are already
+  stored per `session:{sid}` and historically tracked in the `active_sessions`
+  Redis set; the blocker is the single `session:active:id` pointer and
+  `start_exam` tearing down whatever session was globally active.
+- **Design:**
+  - `active_sessions` (set) is the registry of live sessions;
+    `session:active:id` is kept only as a **legacy "most recent" pointer** for
+    the CLI/tools, never as an authorization/ownership gate.
+  - Per-user index `user:{username}:active_session` (new) → the session a user is
+    currently running. Token index `token:{token}` (existing) stays the
+    invitation link resolution.
+  - `is_session_active(sid)` = membership in `active_sessions` (drop the
+    `session:active:id == sid` requirement).
+  - **Resolution is contextual:** a request resolves its session from (a) its
+    candidate token, else (b) the authenticated user's active session, else
+    (c) nothing. It must never fall back to "whatever session is globally
+    active" for a candidate.
+  - `start_exam` / `presets/generate` archive+teardown only the **caller's own**
+    previous session (same user/token), not the global one; the resource cap
+    (`max_concurrent_sessions`) remains the concurrency limit.
+  - Background workers (timer/expiry/idle reaper) iterate **all**
+    `active_sessions`; admin lists iterate all active sessions.
+  - Terminal / VNC: candidates resolve their own session; admins must pass an
+    explicit session id (terminal already does) or get the legacy pointer.
+- **Out of scope:** per-session X11 clipboard monitor stays host-global (one
+  management display); it is a known limitation, not a concurrency blocker.
+- **Status:** accepted.

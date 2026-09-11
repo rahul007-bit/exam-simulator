@@ -453,9 +453,9 @@ sudo systemctl enable --now exam-vnc.service exam-novnc.service k8s-web.service
 
 #### Frontend build (Vue 3 + Vite)
 
-Since the FE-040 cutover the built Vue SPA is the **only** UI: `web/server.py`
-serves `web/dist/` (assets mount + SPA fallback) and owns `/admin` as well. There
-is no legacy `web/static` UI any more.
+Since the FE-040 cutover the built Vue SPA is the **only** UI: the backend
+(`web/api` + `web/server.py` facade) serves `web/dist/` (assets mount + SPA
+fallback) and owns `/admin` as well. There is no legacy static UI any more.
 
 `tools/build-frontend.sh` runs on every start and builds `web/frontend/` into
 `web/dist/`:

@@ -1630,8 +1630,8 @@
       "depends": [
         "FE-004"
       ],
-      "owner": null,
-      "status": "todo",
+      "owner": "opencode",
+      "status": "verified",
       "verifier": null,
       "deliverable": "user store + role claims + password hashing + login/logout/session endpoints",
       "acceptance": [
@@ -1642,7 +1642,7 @@
       "verification": [
         "security review + endpoint tests"
       ],
-      "evidence": null,
+      "evidence": ".agents/FS-001-opencode/EVIDENCE.md",
       "notes": "Future scope (D-009).",
       "tests": []
     },
@@ -1655,8 +1655,8 @@
       "depends": [
         "FS-001"
       ],
-      "owner": null,
-      "status": "todo",
+      "owner": "opencode",
+      "status": "verified",
       "verifier": null,
       "deliverable": "/login route, auth Pinia store, role guards",
       "acceptance": [
@@ -1667,7 +1667,7 @@
       "verification": [
         "manual role flows"
       ],
-      "evidence": null,
+      "evidence": ".agents/FS-002-opencode/EVIDENCE.md",
       "notes": "Routes stubbed during migration.",
       "tests": []
     },
@@ -1680,8 +1680,8 @@
       "depends": [
         "FS-001"
       ],
-      "owner": null,
-      "status": "todo",
+      "owner": "opencode",
+      "status": "verified",
       "verifier": null,
       "deliverable": "ExamSession ownership fields + per-user session storage",
       "acceptance": [
@@ -1691,7 +1691,7 @@
       "verification": [
         "migration test of session data"
       ],
-      "evidence": null,
+      "evidence": ".agents/FS-003-opencode/EVIDENCE.md",
       "notes": "Replaces single global var/session.json.",
       "tests": []
     },
@@ -1704,8 +1704,8 @@
       "depends": [
         "FS-003"
       ],
-      "owner": null,
-      "status": "todo",
+      "owner": "opencode",
+      "status": "verified",
       "verifier": null,
       "deliverable": "assignment UI + API",
       "acceptance": [
@@ -1715,7 +1715,7 @@
       "verification": [
         "end-to-end assign/start"
       ],
-      "evidence": null,
+      "evidence": ".agents/FS-004-opencode/EVIDENCE.md",
       "notes": "",
       "tests": []
     },
@@ -1729,8 +1729,8 @@
         "FS-002",
         "FS-004"
       ],
-      "owner": null,
-      "status": "todo",
+      "owner": "opencode",
+      "status": "verified",
       "verifier": null,
       "deliverable": "/dashboard listing only the user's exams",
       "acceptance": [
@@ -1740,7 +1740,7 @@
       "verification": [
         "manual user flow"
       ],
-      "evidence": null,
+      "evidence": ".agents/FS-005-opencode/EVIDENCE.md",
       "notes": "",
       "tests": []
     },
@@ -1753,8 +1753,8 @@
       "depends": [
         "FE-004"
       ],
-      "owner": null,
-      "status": "todo",
+      "owner": "opencode",
+      "status": "verified",
       "verifier": null,
       "deliverable": "POST /api/presets/generate {count, difficulty, domains?} -> ephemeral preset + session",
       "acceptance": [
@@ -1764,7 +1764,7 @@
       "verification": [
         "API tests for counts/difficulties"
       ],
-      "evidence": null,
+      "evidence": ".agents/FS-006-opencode/EVIDENCE.md",
       "notes": "Build on QuestionSelector + deploy_sequential.",
       "tests": []
     },
@@ -1777,8 +1777,8 @@
       "depends": [
         "FS-006"
       ],
-      "owner": null,
-      "status": "todo",
+      "owner": "opencode",
+      "status": "verified",
       "verifier": null,
       "deliverable": "count + difficulty (+ domains) builder, no question listing",
       "acceptance": [
@@ -1788,7 +1788,7 @@
       "verification": [
         "manual builder flow"
       ],
-      "evidence": null,
+      "evidence": ".agents/FS-007-opencode/EVIDENCE.md",
       "notes": "",
       "tests": []
     },
@@ -1801,8 +1801,8 @@
       "depends": [
         "FS-002"
       ],
-      "owner": null,
-      "status": "todo",
+      "owner": "opencode",
+      "status": "verified",
       "verifier": null,
       "deliverable": "catalog visible only to admins; users see assignments only",
       "acceptance": [
@@ -1812,8 +1812,33 @@
       "verification": [
         "authorization tests"
       ],
-      "evidence": null,
+      "evidence": ".agents/FS-008-opencode/EVIDENCE.md",
       "notes": "",
+      "tests": []
+    },
+    {
+      "id": "FS-003b",
+      "kind": "future",
+      "phase": "Future (FS)",
+      "milestone": null,
+      "title": "Concurrent per-user sessions (multi-session)",
+      "depends": [
+        "FS-003",
+        "FS-004"
+      ],
+      "owner": null,
+      "status": "in-review",
+      "verifier": null,
+      "deliverable": "true per-user concurrent active sessions (each user owns an independent session); remove the single-active-session assumption from terminal/VNC/reaper resolution",
+      "acceptance": [
+        "two users run exams concurrently",
+        "terminal/VNC resolve per session, not session:active:id"
+      ],
+      "verification": [
+        "concurrency integration test"
+      ],
+      "evidence": ".agents/FS-003b-opencode/EVIDENCE.md",
+      "notes": "FS-003 retires var/session.json and records ownership; multi-session is deferred here. Depends on FS-004 assignment.",
       "tests": []
     }
   ]
