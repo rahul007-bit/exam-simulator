@@ -1285,8 +1285,8 @@
       "depends": [
         "FE-040"
       ],
-      "owner": null,
-      "status": "todo",
+      "owner": "implementer-fe041",
+      "status": "verified",
       "verifier": "independent-agent",
       "deliverable": "no runtime CDN calls; Inter + JetBrains Mono + all libs bundled",
       "acceptance": [
@@ -1298,7 +1298,7 @@
         "devtools network audit",
         "load with network disabled"
       ],
-      "evidence": null,
+      "evidence": ".agents/fe041-043-verifier/EVIDENCE.md",
       "notes": "",
       "tests": [
         {
@@ -1324,8 +1324,8 @@
       "depends": [
         "FE-040"
       ],
-      "owner": null,
-      "status": "todo",
+      "owner": "implementer-fe042",
+      "status": "verified",
       "verifier": "independent-agent",
       "deliverable": "E2E journeys (start -> navigate -> submit; admin) + axe checks",
       "acceptance": [
@@ -1337,7 +1337,7 @@
         "npx playwright test",
         "axe report"
       ],
-      "evidence": null,
+      "evidence": ".agents/fe041-043-verifier/EVIDENCE.md",
       "notes": "",
       "tests": [
         {
@@ -1363,8 +1363,8 @@
       "depends": [
         "FE-040"
       ],
-      "owner": null,
-      "status": "todo",
+      "owner": "implementer-fe043",
+      "status": "verified",
       "verifier": "independent-agent",
       "deliverable": "document build-on-deploy, dev workflow, new frontend structure",
       "acceptance": [
@@ -1375,7 +1375,7 @@
       "verification": [
         "follow docs from clean state"
       ],
-      "evidence": null,
+      "evidence": ".agents/fe041-043-verifier/EVIDENCE.md",
       "notes": "",
       "tests": [
         {

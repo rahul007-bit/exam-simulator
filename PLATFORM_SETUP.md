@@ -47,6 +47,14 @@ sudo ./tools/setup-platform.sh
 
 The script is **fully automated and idempotent**. It installs all dependencies, configures users, patches noVNC, sets up systemd services, tunes OS timers, and starts everything.
 
+> [!IMPORTANT]
+> **Frontend build prerequisite:** the web UI is a Vue 3 + Vite SPA that is built
+> **on deploy** into `web/dist/` (git-ignored, decision D-005). The host therefore
+> needs **Node.js >= 20.19 + npm**; `bun` is also accepted by the build helper.
+> `tools/setup-platform.sh` does **not** install Node — provision it first (e.g.
+> via your distro packages, NodeSource, or `nvm`) or `web/dist/` will be missing
+> and the server will return **503** until it is built.
+
 ---
 
 ## Detailed Manual Step-by-Step Guide
@@ -437,18 +445,35 @@ RestartSec=3
 WantedBy=multi-user.target
 ```
 
-> **Frontend build (Vue 3 + Vite):** `build-frontend.sh` runs on every start and
-> builds `web/frontend/` into `web/dist/`, which `web/server.py` serves with an SPA
-> fallback. Requires **Node.js >= 20.19 + npm** on the host (the script also accepts
-> `bun`). `web/dist/` is git-ignored (D-005): it is built on deploy, never committed.
-> The built SPA is required: if the build is absent the server returns **503** until
-> `web/dist` exists (FE-040 cutover removed the legacy static UI).
-
 Enable and start services:
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now exam-vnc.service exam-novnc.service k8s-web.service
 ```
+
+#### Frontend build (Vue 3 + Vite)
+
+Since the FE-040 cutover the built Vue SPA is the **only** UI: `web/server.py`
+serves `web/dist/` (assets mount + SPA fallback) and owns `/admin` as well. There
+is no legacy `web/static` UI any more.
+
+`tools/build-frontend.sh` runs on every start and builds `web/frontend/` into
+`web/dist/`:
+
+- it prefers `npm` (`npm ci && npm run build`) and falls back to `bun`
+  (`bun install && bun run build`);
+- it is invoked by `tools/start-web.sh` and by the systemd `ExecStartPre` above,
+  so deploying or restarting `k8s-web.service` rebuilds the SPA automatically;
+- it **requires Node.js >= 20.19 + npm** on the host (`bun` accepted as an
+  alternative). If neither is present it exits 0 with a warning.
+
+`web/dist/` is git-ignored (D-005): it is built on deploy, never committed. The
+build is mandatory — if it is absent the server returns **503** (`Frontend build
+missing; run tools/build-frontend.sh`) for app routes, including `/admin`.
+
+For local development, run `cd web/frontend && npm install && npm run dev`
+(Vite on `:5173`, proxying `/api`, `/ws`, `/novnc` to `:3000`). See
+[`web/frontend/README.md`](web/frontend/README.md).
 
 ---
 

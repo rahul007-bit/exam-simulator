@@ -11,15 +11,14 @@ slate+indigo design system (dark + light), preserving strict behavioral parity. 
 
 ## 2. Status snapshot
 
-- Board: **27 verified, 19 todo** (46 tasks). `python scripts/agents_board.py --check` is green.
-- Verified: `FE-000..005, 010..014, 020..032, 034, 035, 036`.
-- Remaining todo: `FE-033`, `FE-040..044`, gates `FE-V1..V5`, backlog `FS-001..008`.
+- Board: **29 verified, 17 todo** (46 tasks). `python scripts/agents_board.py --check` is green.
+- Verified: `FE-000..005, 010..014, 020..036` (incl. `FE-033` admin create invite and `FE-040`
+  legacy removal + static cutover).
+- Remaining todo: `FE-041..044`, gates `FE-V1..V5`, backlog `FS-001..008`.
 
 ### Remaining tasks
 | ID | Depends | Title |
 |---|---|---|
-| FE-033 | FE-031 | Admin create invite |
-| FE-040 | all FE-020..035 (incl. FE-033) | Legacy removal + static cutover |
 | FE-041 | FE-040 | Self-host fonts/deps (offline) |
 | FE-042 | FE-040 | Playwright E2E + axe |
 | FE-043 | FE-040 | Update docs |
@@ -27,9 +26,10 @@ slate+indigo design system (dark + light), preserving strict behavioral parity. 
 | FE-V1..V4 | phase tasks | Milestone independent-verification gates |
 | FE-V5 | FE-040..044 | Victory audit |
 
-**Immediate next:** implement **FE-033** (admin "create invite" — `POST /api/admin/sessions/create`,
-copyable URL, toast). Then **FE-040** (cutover) unblocks; after that FE-041/042/043 can run in parallel,
-then FE-044, then the gates.
+**Immediate next:** **FE-040** (legacy removal + static cutover) is **done/verified**, so
+**FE-041** (self-host assets), **FE-042** (E2E + axe) and **FE-043** (docs) are running in
+parallel on disjoint file sets. After they land, run **FE-044** (full regression vs the real
+backend), then the gates **FE-V1..V5**.
 
 ## 3. Where everything lives
 
@@ -40,9 +40,32 @@ then FE-044, then the gates.
   - `scripts/agents_board.py` (CLI: `--check --claim ID AGENT --force REASON --status --set-evidence --verify --unclaim --reject`)
 - Frontend app: `web/frontend/` (Vue 3 + TS + Vite, **Tailwind v4** via `@tailwindcss/vite`, `@headlessui/vue`,
   Pinia, vue-router, `@tanstack/vue-table`, xterm, marked+DOMPurify+highlight.js, axe-core).
-- Backend: `web/server.py` now serves the built SPA (`web/dist`) with a client-side fallback (FE-003);
-  legacy `web/static` is the fallback when `web/dist` is absent. Build helper `tools/build-frontend.sh`
-  (called by `tools/start-web.sh` and systemd `ExecStartPre`).
+- Backend: `web/server.py` serves the built SPA (`web/dist`) with a client-side-routing fallback and
+  owns `/admin`; since the FE-040 cutover there is **no** legacy `web/static` UI — the built SPA is
+  the only UI and the server returns **503** until `web/dist` exists. Build helper
+  `tools/build-frontend.sh` (called by `tools/start-web.sh` and the systemd `ExecStartPre`).
+
+### Frontend architecture (Vue 3 + Vite SPA)
+
+- **Stack:** Vue 3 + TypeScript + Vite, **Tailwind v4** (`@tailwindcss/vite`), Headless UI, Pinia,
+  vue-router, TanStack Table, xterm (+ fit addon), noVNC (hosted at `/novnc`), marked + DOMPurify +
+  highlight.js; axe-core + Playwright/Vitest for tests.
+- **Source layout (`web/frontend/src/`):**
+  - `views/` — route views (`CandidateView`, `AdminView`, `LoginView`, `DevUiView`, `PlaceholderView`)
+  - `components/layout/` — `AppShell`, `AppHeader`, `OverflowMenu`, `WorkspaceSplit`
+  - `components/ui/` — design-system primitives (`Button`, `Modal`, `DataTable`, `Select`, ...)
+  - `components/candidate/` — `TaskPane`, `QuestionDrawer`, `ExamScorecard`, `RecordingsModal`, ...
+  - `components/admin/` — config/resource/invite forms, infrastructure table, `ObserveOverlay`, ...
+  - `components/workspace/` — workspace "islands": `XTerm`, `NoVncFrame`, `WorkspaceTabs`,
+    `ClipboardBridge`, `ReplayPlayer`
+  - `composables/`, `stores/`, `api/` — behavior, Pinia state, typed API clients (generated `schema.d.ts`)
+  - `assets/styles/` — design tokens + base styles; `router/`
+  - `tests/unit` (Vitest), `tests/e2e` (Playwright)
+- **Build-on-deploy:** `web/frontend/` builds to `web/dist/`, which is **git-ignored** (D-005) and
+  **never committed**. `tools/build-frontend.sh` (npm, else bun; requires **Node.js >= 20.19 + npm**)
+  is invoked by `tools/start-web.sh` and the systemd `ExecStartPre`.
+- **Dev:** `cd web/frontend && npm install && npm run dev` (Vite on `:5173`, proxying `/api`, `/ws`,
+  `/novnc` to `:3000`). See `web/frontend/README.md`.
 
 ## 4. How to work (parallel batch mode — PROTOCOL §9)
 
@@ -107,9 +130,9 @@ npx playwright test         # chromium; config webServer = `npm run dev`
   user accepted this).
 - **Board CLI** requires evidence before `in-review`/`verified`; `--claim` enforces the dep gate.
 - **Pre-existing, not ours — do not touch/delete:** modified `core/deployer.py`, `core/k3d_manager.py`,
-  `docker/desktop/entrypoint.sh`, `web/static/{index,admin}.html`, `web/static/js/app.js`, and the many
-  untracked `scratch/*` files. (A past subagent deleted `ansible/*.cfg|ini`; it was restored — keep an
-  eye out and use `git restore` if it recurs.)
+  `docker/desktop/entrypoint.sh`, and the many untracked `scratch/*` files. The legacy `web/static`
+  UI (`index/admin.html`, `js/app.js`) was **deleted in FE-040** — do not restore it. (A past subagent
+  deleted `ansible/*.cfg|ini`; it was restored — keep an eye out and use `git restore` if it recurs.)
 
 ## 8. Known integration gaps / TODOs
 
@@ -125,11 +148,10 @@ npx playwright test         # chromium; config webServer = `npm run dev`
 ## 9. Suggested next actions
 
 1. `python scripts/agents_board.py --check`
-2. Implement **FE-033** (admin create invite) — either solo or batch with an independent task.
-3. Implement **FE-040** (remove legacy `web/static` app.js/admin.js/html, serve only `web/dist`, update
-   `web/server.py` mounts + docs) once FE-033 is verified.
-4. Then batch **FE-041 (self-host assets)**, **FE-042 (E2E+axe)**, **FE-043 (docs)**; then **FE-044**.
-5. Run **FE-V1..V5** gates (independent verification) and close out.
+2. **FE-033 (admin create invite)** and **FE-040 (legacy removal + static cutover)** are **done/verified**.
+3. Batch **FE-041 (self-host assets)**, **FE-042 (E2E+axe)** and **FE-043 (docs)** in parallel; then
+   **FE-044** (full regression vs real backend).
+4. Run **FE-V1..V5** gates (independent verification) and close out.
 
 ## 10. Session fixes (2026-09-10, uncommitted — parity gaps not yet on the board)
 

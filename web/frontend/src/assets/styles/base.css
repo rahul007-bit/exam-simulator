@@ -10,6 +10,7 @@
  */
 
 @import 'tailwindcss';
+@import './fonts.css';
 
 @theme inline {
   /* Surfaces + text */

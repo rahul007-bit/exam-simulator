@@ -55,11 +55,21 @@ npm run build   # type-check (vue-tsc) + Vite build -> web/dist/
 src/
   main.ts  App.vue
   router/            # "/" candidate, "/admin" admin, future-scope placeholders
-  views/             # route views
-  components/        # common/ candidate/ admin/   (FE-010+)
-  islands/           # XTerm, NoVncFrame, ReplayPlayer (FE-025+)
-  stores/  api/  composables/                     (FE-004+)
+  views/             # route views (CandidateView, AdminView, LoginView, ...)
+  components/
+    layout/          # AppShell, AppHeader, OverflowMenu, WorkspaceSplit
+    ui/              # design-system primitives (Button, Modal, DataTable, ...)
+    candidate/       # TaskPane, QuestionDrawer, ExamScorecard, RecordingsModal, ...
+    admin/           # config/resource/invite forms, infrastructure table, ObserveOverlay, ...
+    workspace/       # workspace "islands": XTerm, NoVncFrame, WorkspaceTabs,
+                     #   ClipboardBridge, ReplayPlayer
+  composables/       # useVnc, useTerminal, useTimer, useClipboard, useSplitPane, ...
+  stores/            # Pinia stores (session, presets, timer, auth)
+  api/               # typed API clients (+ generated schema.d.ts)
   assets/styles/     # design tokens + base styles (FE-002)
+tests/
+  unit/              # Vitest unit tests
+  e2e/               # Playwright E2E specs
 ```
 
 See `.agents/frontend-migration/PLAN.md` for the full design and task board.

@@ -96,6 +96,27 @@ sudo systemctl restart exam-vnc.service      # TigerVNC XFCE desktop (:5901)
 sudo systemctl restart exam-novnc.service    # WebSockify noVNC bridge (:6080)
 ```
 
+### Frontend Build (Vue 3 SPA)
+
+The web UI is a **Vue 3 + TypeScript + Vite** single-page app in `web/frontend/`
+(Tailwind v4, Headless UI, Pinia, vue-router, TanStack Table, xterm, noVNC). It
+builds to `web/dist/`, which is **git-ignored** (decision D-005) and therefore
+**built on deploy** — never committed.
+
+The build is performed by `tools/build-frontend.sh`, which is invoked both by
+`tools/start-web.sh` and by the systemd `ExecStartPre` for `k8s-web.service`. It
+requires **Node.js >= 20.19 + npm** (`bun` is also accepted). `web/server.py`
+serves only the built SPA (`/`, `/admin`, SPA fallback) and returns **503** until
+`web/dist` exists.
+
+For local development against a running backend on `:3000`:
+
+```bash
+cd web/frontend
+npm install
+npm run dev      # Vite dev server on :5173, proxies /api, /ws, /novnc to :3000
+```
+
 ### Candidate Mode vs. Proctor Mode
 
 By default, navigating to `http://<platform-ip>:3000/` strictly defaults to **Candidate Mode**.
@@ -205,10 +226,10 @@ examctl unflag 3
 
 ## Documentation Links
 
-- [HANDOVER.md](file:///home/amazinrahul/Projects/4-sep-test/cka-labs/HANDOVER.md): Comprehensive system handover, runbooks, and Phase 2 dynamic architecture.
-- [PRD.md](file:///home/amazinrahul/Projects/4-sep-test/cka-labs/PRD.md): Product Requirements Document (v2.0.0).
-- [PLATFORM_SETUP.md](file:///home/amazinrahul/Projects/4-sep-test/cka-labs/PLATFORM_SETUP.md): Detailed host provisioning and cluster bootstrap guide.
-- [STATUS.md](file:///home/amazinrahul/Projects/4-sep-test/cka-labs/STATUS.md): Current engineering status and milestones.
+- [PLATFORM_SETUP.md](PLATFORM_SETUP.md): Host provisioning (XFCE, TigerVNC, noVNC), systemd services, and cluster bootstrap.
+- [PRD.md](PRD.md): Product Requirements Document (v2.0.0).
+- [CONCURRENT_MULTI_NODE_ARCHITECTURE.md](CONCURRENT_MULTI_NODE_ARCHITECTURE.md): Concurrent multi-node & microVM architecture blueprint.
+- [web/frontend/README.md](web/frontend/README.md): Vue SPA requirements, dev/build workflow, and structure.
 
 ---
 
