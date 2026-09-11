@@ -507,6 +507,11 @@ fixes → P3 channel+actor tagging + replay tabs → P4 desktop terminal recordi
 - Rollback: `/tmp/pre-notify.tar.gz` (web/api, redis_bus, dist, desk-agent).
 - **Note:** running desktops keep the old image; new sessions pick up the new
   one. P4/notify not yet exercised live.
+- **Notify gotcha (resolved):** desktop-image changes only apply to *newly
+  created* desktop containers. A live session on the old image showed nothing.
+  Recreate with `desktop_mgr.stop_desktop(sid); start_desktop(sid)` (or start a
+  new session). Verified end-to-end: `pubsub numsub notify:{sid}` = 1,
+  publish receiver = 1, `xmessage` popup process present in the container.
 
 ### Full redeploy (2026-09-11)
 - Redeployed the whole local state: `web/api/`, `core/` (all), rebuilt
