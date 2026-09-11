@@ -1,12 +1,23 @@
 <script setup lang="ts">
 import { FitAddon } from '@xterm/addon-fit'
+import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/vue'
 import { Terminal } from '@xterm/xterm'
 import type { ITheme } from '@xterm/xterm'
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch } from 'vue'
+import {
+  computed,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  shallowRef,
+  useId,
+  useTemplateRef,
+  watch,
+} from 'vue'
 
 import type { RecordingEvent, TaskTimelineEntry } from '@/api/recordings'
+import { getRecordingCast } from '@/api/recordings'
 import { formatReplayTime, useReplay } from '@/composables/useReplay'
-import { Badge, Button, Icon, SegmentedControl, Select } from '@/components/ui'
+import { Badge, Button, FOCUS_RING, Icon, SegmentedControl, Select, Spinner } from '@/components/ui'
 import type { BadgeVariant, SegmentOption, SelectOption } from '@/components/ui'
 
 import '@xterm/xterm/css/xterm.css'
@@ -16,17 +27,27 @@ import '@xterm/xterm/css/xterm.css'
  *
  * Renders the `.cast` recording into an xterm.js terminal and drives it with
  * `useReplay` (parser + rAF playback loop ported from the legacy replay engine).
- * The right-hand sidebar shows the session event log (and task navigation)
- * with the active entry synced to the playhead; clicking an entry seeks.
+ * The left sidebar owns the actor/channel selector (User ▾ Web/Desktop, Admin)
+ * aligned with the Events/Tasks tabs; its event log is filtered by the active
+ * channel and synced to the playhead. The right side shows the terminal replay
+ * with its transport controls.
  *
  * Parity notes: only `"o"` frames are written, `reset()` + re-feed on seek,
  * `mm:ss` times, and a 0.5–10x speed range — matching the legacy replay engine.
  */
 
+defineOptions({ name: 'ReplayPlayer' })
+
 const props = withDefaults(
   defineProps<{
-    /** Raw asciinema v2 `.cast` text. */
+    /** Raw asciinema v2 `.cast` text. Used when no `sessionId` is supplied. */
     castText?: string | null
+    /** Session to replay; when set the `.cast` is fetched per `channel`. */
+    sessionId?: string
+    /** Active channel: `user-web`, `user-desktop` or `admin-web`. */
+    channel?: string
+    /** Whether the active channel has a cast (drives the terminal empty state). */
+    hasCast?: boolean
     /** Structured session events (used by the event timeline). */
     events?: RecordingEvent[]
     /** Task navigation intervals (used by the tasks timeline). */
@@ -41,6 +62,9 @@ const props = withDefaults(
   }>(),
   {
     castText: null,
+    sessionId: '',
+    channel: 'user-web',
+    hasCast: true,
     events: () => [],
     tasks: () => [],
     durationFallback: 0,
@@ -50,12 +74,56 @@ const props = withDefaults(
   },
 )
 
+const emit = defineEmits<{ 'update:channel': [value: string] }>()
+
+const uid = useId()
+const userTabId = computed(() => `replay-tab-user-${uid}`)
+const adminTabId = computed(() => `replay-tab-admin-${uid}`)
+const panelId = computed(() => `replay-panel-${uid}`)
+
+/** Channels offered by the User ▾ menu — always both, independent of `has_cast`. */
+const USER_CHANNELS: SelectOption[] = [
+  { value: 'user-web', label: 'Web' },
+  { value: 'user-desktop', label: 'Desktop' },
+]
+
+const channelModel = computed({
+  get: () => props.channel,
+  set: (value: string) => emit('update:channel', value),
+})
+const isAdmin = computed(() => props.channel === 'admin-web')
+
+/** Legacy events predate channel tagging and belong to the candidate web stream. */
+const LEGACY_EVENT_CHANNEL = 'user-web'
+
+function eventChannel(event: RecordingEvent): string {
+  return event.channel && event.channel.length > 0 ? event.channel : LEGACY_EVENT_CHANNEL
+}
+
+/** Events whose channel matches the active actor/channel selection. */
+const filteredEvents = computed(() =>
+  props.events.filter((event) => eventChannel(event) === props.channel),
+)
+
+function actorTabClass(active: boolean): string[] {
+  return [
+    'inline-flex h-7 items-center justify-center gap-1 rounded-[var(--radius-sm)] px-3 text-xs font-medium transition-colors',
+    FOCUS_RING,
+    active
+      ? 'bg-accent-solid text-accent-contrast'
+      : 'text-text-muted hover:bg-hover hover:text-text',
+  ]
+}
+
 const containerRef = useTemplateRef<HTMLDivElement>('container')
 const terminalRef = shallowRef<Terminal | null>(null)
 const fitAddonRef = shallowRef<FitAddon | null>(null)
 
 let resizeObserver: ResizeObserver | null = null
 let connectFrame: number | null = null
+let castController: AbortController | null = null
+let castToken = 0
+const castLoading = ref(false)
 
 function readToken(name: string, fallback: string): string {
   if (typeof document === 'undefined') return fallback
@@ -143,7 +211,8 @@ function str(value: unknown): string {
 
 function eventVariant(type: string): BadgeVariant {
   if (type === 'SESSION_START' || type === 'EXAM_SUBMITTED') return 'success'
-  if (type === 'TASK_FLAGGED' || type === 'TASK_UNFLAGGED' || type === 'TASK_RETRY') return 'warning'
+  if (type === 'TASK_FLAGGED' || type === 'TASK_UNFLAGGED' || type === 'TASK_RETRY')
+    return 'warning'
   if (type === 'TASK_EVALUATION') return 'info'
   if (type === 'TASK_DEPLOYED') return 'accent'
   if (type === 'WINDOW_FOCUS') return 'accent'
@@ -230,9 +299,59 @@ function observeContainer(container: HTMLDivElement): void {
   window.addEventListener('resize', handleWindowResize)
 }
 
-function loadCast(text: string | null | undefined): void {
-  if (typeof text === 'string' && text.length > 0) replay.loadCast(text)
-  else replay.reset()
+/**
+ * Install a parsed cast while optionally carrying the playhead and playback
+ * state across the swap, so switching channels does not reset the timeline.
+ */
+function applyCast(text: string | null | undefined, preserve: boolean): void {
+  const playhead = currentTime.value
+  const wasPlaying = isPlaying.value
+  const payload = typeof text === 'string' ? text : ''
+  replay.loadCast(payload)
+  if (preserve) {
+    replay.seek(playhead)
+    if (wasPlaying && currentTime.value < duration.value) replay.play()
+  }
+}
+
+/**
+ * Load the active channel's cast. `preserve` keeps the current playhead +
+ * playing state (channel switches); otherwise the playhead resets (session
+ * changes). A stale response is discarded via `castToken`. Channels without a
+ * cast skip the fetch entirely so the terminal shows its empty state while the
+ * event/task timeline keeps working.
+ */
+async function loadChannel(preserve: boolean): Promise<void> {
+  if (!props.sessionId) {
+    castLoading.value = false
+    applyCast(props.castText, preserve)
+    return
+  }
+
+  castController?.abort()
+  castController = null
+  castToken += 1
+
+  if (!props.hasCast) {
+    castLoading.value = false
+    applyCast(null, preserve)
+    return
+  }
+
+  const controller = new AbortController()
+  castController = controller
+  const token = ++castToken
+  castLoading.value = true
+  try {
+    const text = await getRecordingCast(props.sessionId, props.channel, controller.signal)
+    if (token !== castToken || controller.signal.aborted) return
+    applyCast(typeof text === 'string' ? text : null, preserve)
+  } catch {
+    if (token !== castToken || controller.signal.aborted) return
+    applyCast(null, preserve)
+  } finally {
+    if (token === castToken) castLoading.value = false
+  }
 }
 
 onMounted(() => {
@@ -260,26 +379,50 @@ onMounted(() => {
   connectFrame = window.requestAnimationFrame(() => {
     connectFrame = null
     fitTerminal()
-    loadCast(props.castText)
   })
+
+  void loadChannel(false)
 })
 
 watch(
-  () => props.castText,
-  (next) => {
-    if (!terminalRef.value) return
-    loadCast(next)
+  () => props.sessionId,
+  () => {
+    if (terminalRef.value) void loadChannel(false)
   },
 )
 
 watch(
-  () => props.events,
+  () => props.channel,
+  () => {
+    if (terminalRef.value) void loadChannel(true)
+  },
+)
+
+watch(
+  () => props.castText,
+  (next) => {
+    if (props.sessionId || !terminalRef.value) return
+    applyCast(next, false)
+  },
+)
+
+watch(
+  () => filteredEvents.value,
   (list) => replay.setEvents(list ?? []),
   { immediate: true },
 )
 
+watch(
+  () => props.hasCast,
+  (next) => {
+    if (next) window.requestAnimationFrame(() => fitTerminal())
+  },
+)
+
 onBeforeUnmount(() => {
   replay.pause()
+  castController?.abort()
+  castController = null
   if (connectFrame !== null) {
     window.cancelAnimationFrame(connectFrame)
     connectFrame = null
@@ -315,36 +458,113 @@ defineExpose({
     <div class="flex flex-col gap-3 lg:flex-row">
       <!-- Event / task timeline (left) — click an entry to seek the replay -->
       <aside v-if="showTimeline" class="flex w-full flex-col gap-2 lg:w-80 lg:flex-none">
-        <div class="flex flex-col gap-1.5">
-          <div class="flex items-center justify-between gap-2">
-            <span class="text-sm font-medium text-text">Replay timeline</span>
-            <span class="text-xs text-text-muted">
-              {{ activeTab === 'tasks' ? `${tasks.length} tasks` : `${events.length} events` }}
-            </span>
+        <div class="flex flex-wrap items-center gap-2" data-testid="replay-controls">
+          <div
+            role="tablist"
+            aria-label="Recording channels"
+            class="inline-flex items-center gap-0.5 rounded-[var(--radius-md)] border border-border bg-surface p-0.5"
+          >
+            <Menu as="div" class="relative">
+              <MenuButton
+                :id="userTabId"
+                type="button"
+                role="tab"
+                :aria-selected="!isAdmin"
+                :aria-controls="panelId"
+                :class="actorTabClass(!isAdmin)"
+                data-testid="recording-tab-user"
+              >
+                User
+                <Icon name="chevron-down" :size="12" class="flex-none" />
+              </MenuButton>
+
+              <Transition
+                enter-active-class="transition duration-100 ease-out motion-reduce:transition-none"
+                enter-from-class="opacity-0 -translate-y-1"
+                enter-to-class="opacity-100 translate-y-0"
+                leave-active-class="transition duration-75 ease-in motion-reduce:transition-none"
+                leave-from-class="opacity-100 translate-y-0"
+                leave-to-class="opacity-0 -translate-y-1"
+              >
+                <MenuItems
+                  class="absolute left-0 z-50 mt-1 w-36 origin-top-left rounded-[var(--radius-md)] border border-border bg-elevated p-1 shadow-[var(--shadow-md)] focus:outline-none"
+                  data-testid="recording-user-menu"
+                >
+                  <MenuItem
+                    v-for="option in USER_CHANNELS"
+                    :key="option.value"
+                    v-slot="{ active }"
+                  >
+                    <button
+                      type="button"
+                      :class="[
+                        'flex w-full items-center justify-between gap-2 rounded-[var(--radius-sm)] px-2.5 py-1.5 text-left text-sm transition-colors',
+                        active ? 'bg-hover' : '',
+                        channel === option.value ? 'font-medium text-accent-text' : 'text-text',
+                      ]"
+                      :data-testid="`recording-user-channel-${option.value}`"
+                      @click="channelModel = option.value"
+                    >
+                      <span class="truncate">{{ option.label }}</span>
+                      <Icon
+                        v-if="channel === option.value"
+                        name="check"
+                        :size="14"
+                        :stroke-width="2.5"
+                        class="flex-none"
+                      />
+                    </button>
+                  </MenuItem>
+                </MenuItems>
+              </Transition>
+            </Menu>
+
+            <button
+              :id="adminTabId"
+              type="button"
+              role="tab"
+              :aria-selected="isAdmin"
+              :aria-controls="panelId"
+              :class="actorTabClass(isAdmin)"
+              data-testid="recording-tab-admin"
+              @click="channelModel = 'admin-web'"
+            >
+              Admin
+            </button>
           </div>
+
           <SegmentedControl
             v-model="activeTab"
             size="sm"
             :options="tabOptions"
             aria-label="Replay timeline"
           />
+
+          <span class="ml-auto text-xs text-text-muted" data-testid="replay-count">
+            {{ activeTab === 'tasks' ? `${tasks.length} tasks` : `${filteredEvents.length} events` }}
+          </span>
         </div>
 
         <div
-          class="max-h-[58vh] min-h-[220px] overflow-y-auto rounded-[var(--radius-md)] border border-border bg-surface p-1"
+          :id="panelId"
+          role="tabpanel"
+          :aria-labelledby="isAdmin ? adminTabId : userTabId"
+          class="max-h-[58vh] min-h-[220px] overflow-y-auto rounded-[var(--radius-md)] border border-border bg-elevated p-1"
           data-testid="replay-timeline"
         >
           <template v-if="activeTab === 'timeline'">
-            <p v-if="events.length === 0" class="p-3 text-sm text-text-muted">
-              No events logged for this session.
+            <p v-if="filteredEvents.length === 0" class="p-3 text-sm text-text-muted">
+              No events logged for this channel.
             </p>
             <ul v-else class="m-0 flex list-none flex-col gap-0.5 p-0">
-              <li v-for="(event, index) in events" :key="index">
+              <li v-for="(event, index) in filteredEvents" :key="index">
                 <button
                   type="button"
                   :class="[
                     'flex w-full flex-col gap-1 rounded-[var(--radius-sm)] border border-transparent px-2 py-1.5 text-left transition-colors hover:bg-hover',
-                    index === activeEventIndex ? 'border-accent/40 bg-[var(--color-accent-subtle)]' : '',
+                    index === activeEventIndex
+                      ? 'border-accent/40 bg-[var(--color-accent-subtle)]'
+                      : '',
                   ]"
                   data-testid="replay-event"
                   @click="replay.seek(eventTime(event))"
@@ -353,7 +573,9 @@ defineExpose({
                     <span class="font-mono text-xs tabular-nums text-text-muted">
                       {{ event.rel_time_formatted || formatReplayTime(event.rel_time) }}
                     </span>
-                    <Badge :variant="eventVariant(event.event)">{{ eventLabel(event.event) }}</Badge>
+                    <Badge :variant="eventVariant(event.event)">{{
+                      eventLabel(event.event)
+                    }}</Badge>
                   </span>
                   <span class="text-xs text-text">{{ eventDescription(event) }}</span>
                 </button>
@@ -371,7 +593,9 @@ defineExpose({
                   type="button"
                   :class="[
                     'flex w-full flex-col gap-1 rounded-[var(--radius-sm)] border border-transparent px-2 py-1.5 text-left transition-colors hover:bg-hover',
-                    index === activeTaskIndex ? 'border-accent/40 bg-[var(--color-accent-subtle)]' : '',
+                    index === activeTaskIndex
+                      ? 'border-accent/40 bg-[var(--color-accent-subtle)]'
+                      : '',
                   ]"
                   data-testid="replay-task"
                   @click="replay.seek(taskTime(task))"
@@ -410,7 +634,10 @@ defineExpose({
 
         <div
           ref="container"
-          class="h-[58vh] min-h-[280px] w-full overflow-hidden rounded-[var(--radius-md)] border border-border bg-app p-1"
+          :class="[
+            'h-[58vh] min-h-[280px] w-full overflow-hidden rounded-[var(--radius-md)] border border-border bg-app p-1',
+            hasCast ? '' : 'hidden',
+          ]"
           role="group"
           :aria-label="ariaLabel"
           data-testid="replay-terminal"
@@ -487,7 +714,23 @@ defineExpose({
       </div>
     </div>
 
-    <p v-if="!hasFrames" class="m-0 text-sm text-text-muted" data-testid="replay-empty">
+    <p
+      v-if="castLoading"
+      class="m-0 flex items-center gap-2 text-sm text-text-muted"
+      data-testid="replay-loading"
+    >
+      <Spinner size="sm" /> Loading terminal recording…
+    </p>
+
+    <p
+      v-else-if="!hasCast"
+      class="m-0 text-sm text-text-muted"
+      data-testid="recording-no-cast"
+    >
+      No recording for this terminal.
+    </p>
+
+    <p v-else-if="!hasFrames" class="m-0 text-sm text-text-muted" data-testid="replay-empty">
       No terminal recording is available for this session.
     </p>
   </div>

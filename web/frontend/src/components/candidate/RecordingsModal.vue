@@ -3,12 +3,10 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 import {
   getRecording,
-  getRecordingCast,
   listRecordings,
-  recordingCastUrl,
   recordingEventsUrl,
 } from '@/api/recordings'
-import type { RecordingDetail, RecordingSummary } from '@/api/recordings'
+import type { RecordingChannel, RecordingDetail, RecordingSummary } from '@/api/recordings'
 import { Badge, Button, DISABLED, FOCUS_RING, Icon, Modal, Spinner } from '@/components/ui'
 import type { BadgeVariant } from '@/components/ui'
 import ReplayPlayer from '@/components/workspace/ReplayPlayer.vue'
@@ -65,9 +63,15 @@ const listError = ref('')
 
 const selectedId = ref<string | null>(null)
 const detail = ref<RecordingDetail | null>(null)
-const castText = ref<string | null>(null)
 const detailLoading = ref(false)
 const detailError = ref('')
+
+/**
+ * Selected recording channel (`user-web` | `user-desktop` | `admin-web`).
+ * `ReplayPlayer` owns the actor/channel selector and emits `update:channel`;
+ * this modal owns the state and the per-session scoping.
+ */
+const channel = ref('user-web')
 
 let listController: AbortController | null = null
 let detailController: AbortController | null = null
@@ -77,6 +81,19 @@ const dialogTitle = computed(() =>
   selectedId.value ? `Session review: ${selectedId.value}` : props.title,
 )
 const dialogDescription = computed(() => (selectedId.value ? null : props.description))
+
+const channels = computed<RecordingChannel[]>(() => detail.value?.channels ?? [])
+const hasChannelMeta = computed(() => channels.value.length > 0)
+
+function channelMeta(id: string): RecordingChannel | undefined {
+  return channels.value.find((channel) => channel.id === id)
+}
+
+/** Whether the currently selected channel has a downloadable/replayable cast. */
+const selectedHasCast = computed(() => {
+  if (!hasChannelMeta.value) return detail.value?.has_cast ?? true
+  return channelMeta(channel.value)?.has_cast ?? false
+})
 
 function abortList(): void {
   listController?.abort()
@@ -113,19 +130,15 @@ async function openRecording(sessionId: string): Promise<void> {
   abortDetail()
   selectedId.value = sessionId
   detail.value = null
-  castText.value = null
   detailError.value = ''
+  channel.value = 'user-web'
   detailLoading.value = true
   const controller = new AbortController()
   detailController = controller
   try {
-    const [meta, cast] = await Promise.all([
-      getRecording(sessionId, controller.signal),
-      getRecordingCast(sessionId, controller.signal).catch(() => null),
-    ])
+    const meta = await getRecording(sessionId, controller.signal)
     if (controller.signal.aborted) return
     detail.value = meta
-    castText.value = typeof cast === 'string' ? cast : null
   } catch (error) {
     if (controller.signal.aborted) return
     detailError.value = error instanceof Error ? error.message : 'Failed to load recording'
@@ -141,7 +154,6 @@ function backToList(): void {
   abortDetail()
   selectedId.value = null
   detail.value = null
-  castText.value = null
   detailError.value = ''
   detailLoading.value = false
 }
@@ -245,11 +257,7 @@ onBeforeUnmount(() => {
                 {{ examName(recording) }}
               </div>
             </div>
-            <Badge
-              :variant="statusVariant(recording)"
-              copyable
-              :copy-text="statusLabel(recording)"
-            >
+            <Badge :variant="statusVariant(recording)" copyable :copy-text="statusLabel(recording)">
               {{ statusLabel(recording) }}
             </Badge>
           </div>
@@ -284,18 +292,6 @@ onBeforeUnmount(() => {
               Review &amp; replay
             </Button>
             <a
-              v-if="recording.has_cast"
-              :href="recordingCastUrl(recording.session_id)"
-              :download="`${recording.session_id}.cast`"
-              :class="[
-                'inline-flex h-8 select-none items-center justify-center gap-1.5 rounded-[var(--radius-sm)] border border-border bg-surface px-3 text-xs font-semibold text-text transition-colors hover:bg-hover',
-                FOCUS_RING,
-                DISABLED,
-              ]"
-            >
-              Download .cast
-            </a>
-            <a
               v-if="recording.has_events"
               :href="recordingEventsUrl(recording.session_id)"
               :download="`${recording.session_id}.events.json`"
@@ -326,18 +322,6 @@ onBeforeUnmount(() => {
           Back to list
         </Button>
         <div class="ml-auto flex flex-wrap items-center gap-2">
-          <a
-            v-if="detail?.has_cast"
-            :href="recordingCastUrl(activeSessionId)"
-            :download="`${activeSessionId}.cast`"
-            :class="[
-              'inline-flex h-8 select-none items-center justify-center gap-1.5 rounded-[var(--radius-sm)] border border-border bg-surface px-3 text-xs font-semibold text-text transition-colors hover:bg-hover',
-              FOCUS_RING,
-              DISABLED,
-            ]"
-          >
-            Download .cast
-          </a>
           <a
             v-if="detail?.has_events"
             :href="recordingEventsUrl(activeSessionId)"
@@ -381,13 +365,18 @@ onBeforeUnmount(() => {
           </div>
         </dl>
 
-        <ReplayPlayer
-          :cast-text="castText"
-          :events="detail.events ?? []"
-          :tasks="detail.task_timeline ?? []"
-          :duration-fallback="detail.duration_seconds ?? 0"
-          :show-events="showEvents"
-        />
+        <div class="flex flex-col gap-3" data-testid="recording-channels">
+          <ReplayPlayer
+            :session-id="activeSessionId"
+            :channel="channel"
+            :has-cast="selectedHasCast"
+            :events="detail.events ?? []"
+            :tasks="detail.task_timeline ?? []"
+            :duration-fallback="detail.duration_seconds ?? 0"
+            :show-events="showEvents"
+            @update:channel="channel = $event"
+          />
+        </div>
       </template>
     </div>
 

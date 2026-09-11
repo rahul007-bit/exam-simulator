@@ -185,4 +185,22 @@ describe('AdminInviteForm (FE-033)', () => {
     await wrapper.get('[data-testid="invite-copy"]').trigger('click')
     expect(wrapper.emitted('copy')?.[0]).toEqual([expected])
   })
+
+  it('emits start with the invite token', async () => {
+    const wrapper = mount(AdminInviteForm, { props: { options: OPTIONS, invite: INVITE } })
+
+    await wrapper.get('[data-testid="invite-start"]').trigger('click')
+
+    expect(wrapper.emitted('start')?.[0]).toEqual([INVITE.token])
+  })
+
+  it('does not emit start while starting', async () => {
+    const wrapper = mount(AdminInviteForm, {
+      props: { options: OPTIONS, invite: INVITE, starting: true },
+    })
+
+    await wrapper.get('[data-testid="invite-start"]').trigger('click')
+
+    expect(wrapper.emitted('start')).toBeUndefined()
+  })
 })

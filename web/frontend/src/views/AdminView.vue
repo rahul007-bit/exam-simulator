@@ -4,10 +4,7 @@ import type { VNode } from 'vue'
 import { useRouter } from 'vue-router'
 
 import type { AdminSessionItem } from '@/api/admin'
-import AdminConfigForm from '@/components/admin/AdminConfigForm.vue'
 import AdminInfrastructureTable from '@/components/admin/AdminInfrastructureTable.vue'
-import AdminInviteForm from '@/components/admin/AdminInviteForm.vue'
-import AdminResourceForm from '@/components/admin/AdminResourceForm.vue'
 import ObserveOverlay from '@/components/admin/ObserveOverlay.vue'
 import SessionActionsDialog from '@/components/admin/SessionActionsDialog.vue'
 import RecordingsModal from '@/components/candidate/RecordingsModal.vue'
@@ -22,8 +19,6 @@ import {
   useAdminSessions,
 } from '@/composables/useAdminSessions'
 import type { SessionAction } from '@/composables/useAdminSessions'
-import { useAdminConfig } from '@/composables/useAdminConfig'
-import { buildInviteUrl, copyTextToClipboard, useAdminInvites } from '@/composables/useAdminInvites'
 import { useAuthStore } from '@/stores/auth'
 
 /**
@@ -41,16 +36,11 @@ import { useAuthStore } from '@/stores/auth'
  * Actions cell shows an inline spinner + status, and the table's `loading` is
  * reserved for the initial load only.
  *
+ * Configuration (default preset, capacity, invites, assignments, custom exams)
+ * lives on the separate `/admin/settings` page (`AdminSettingsView`).
+ *
  * The route is already auth-gated by the FE-030 router guard, so this view
  * assumes an authenticated admin.
- *
- * FE-032: the page also hosts the global default-preset selector
- * (`AdminConfigForm` → `/api/admin/config`) and the server resource limit form
- * (`AdminResourceForm` → `/api/admin/resources`), each with inline validation
- * and toast feedback.
- *
- * TODO(assign-to-user): FS-004 will add an "assign to user" action. The
- * reserved slot lives in `components/admin/SessionActionsDialog.vue`.
  */
 
 interface AdminSessionRow extends AdminSessionItem {
@@ -62,19 +52,6 @@ const router = useRouter()
 const { push } = useToast()
 const { sessions, loading, refreshing, fetchSessions, runAction, identifierFor, pendingActionFor } =
   useAdminSessions()
-const {
-  presetOptions,
-  defaultPreset,
-  resources,
-  loading: configLoading,
-  savingPreset,
-  savingResources,
-  presetName,
-  loadAll: loadAdminConfig,
-  saveDefaultPreset,
-  saveMaxSessions,
-} = useAdminConfig()
-const { creating: inviteCreating, latestInvite, createInvite } = useAdminInvites()
 
 const actionsOpen = ref(false)
 const selected = ref<AdminSessionItem | null>(null)
@@ -192,67 +169,6 @@ async function refresh(): Promise<void> {
   }
 }
 
-async function refreshAdminConfig(): Promise<void> {
-  try {
-    await loadAdminConfig()
-  } catch (cause) {
-    push({ variant: 'error', message: describeError(cause) })
-  }
-}
-
-async function onSavePreset(preset: string): Promise<void> {
-  try {
-    await saveDefaultPreset(preset)
-    push({ variant: 'success', message: `Default preset set to ${presetName(preset) ?? preset}` })
-  } catch (cause) {
-    push({
-      variant: 'error',
-      title: 'Could not save default preset',
-      message: describeError(cause),
-    })
-  }
-}
-
-async function onSaveMaxSessions(limit: number): Promise<void> {
-  try {
-    await saveMaxSessions(limit)
-    push({ variant: 'success', message: `Concurrency limit updated to ${limit}` })
-  } catch (cause) {
-    push({
-      variant: 'error',
-      title: 'Could not update resource limit',
-      message: describeError(cause),
-    })
-  }
-}
-
-function onInvalidMaxSessions(message: string): void {
-  push({ variant: 'warning', message })
-}
-
-async function onCreateInvite(preset: string): Promise<void> {
-  try {
-    const invite = await createInvite(preset || undefined)
-    await copyTextToClipboard(buildInviteUrl(invite.url))
-    push({ variant: 'success', message: 'Candidate link generated & copied!' })
-  } catch (cause) {
-    push({
-      variant: 'error',
-      title: 'Could not create invite',
-      message: describeError(cause),
-    })
-  }
-}
-
-async function onCopyInvite(url: string): Promise<void> {
-  try {
-    await copyTextToClipboard(url)
-    push({ variant: 'success', message: 'Invite link copied to clipboard!' })
-  } catch (cause) {
-    push({ variant: 'error', message: describeError(cause) })
-  }
-}
-
 function onRowClick(row: AdminSessionRow): void {
   if (!identifierFor(row)) {
     push({ variant: 'warning', message: 'This row has no session id or token to act on.' })
@@ -323,7 +239,6 @@ function onReview(): void {
 
 onMounted(() => {
   void refresh()
-  void refreshAdminConfig()
 })
 </script>
 
@@ -335,42 +250,16 @@ onMounted(() => {
         subtitle="Signed in as an administrator. Manage exam sessions, invitations and history."
       >
         <template #actions>
+          <Button
+            variant="secondary"
+            data-testid="admin-settings-link"
+            @click="router.push('/admin/settings')"
+          >
+            Settings
+          </Button>
           <Button variant="secondary" :loading="auth.loading" @click="onLogout"> Sign out </Button>
         </template>
-        <p class="m-0 text-sm text-text-muted">
-          Manage the default preset, server capacity and exam sessions from this page.
-        </p>
       </Card>
-
-      <div class="grid gap-4 lg:grid-cols-2">
-        <div class="flex flex-col gap-4">
-          <AdminConfigForm
-            :saved="defaultPreset"
-            :options="presetOptions"
-            :loading="configLoading"
-            :saving="savingPreset"
-            @save="onSavePreset"
-            @reload="refreshAdminConfig"
-          />
-
-          <AdminInviteForm
-            :options="presetOptions"
-            :invite="latestInvite"
-            :creating="inviteCreating"
-            @create="onCreateInvite"
-            @copy="onCopyInvite"
-          />
-        </div>
-
-        <AdminResourceForm
-          :resources="resources"
-          :loading="configLoading"
-          :saving="savingResources"
-          @save="onSaveMaxSessions"
-          @invalid="onInvalidMaxSessions"
-          @reload="refreshAdminConfig"
-        />
-      </div>
 
       <Card title="Sessions" subtitle="Active exams, invitations and history">
         <template #actions>

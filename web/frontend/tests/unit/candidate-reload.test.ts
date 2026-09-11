@@ -38,6 +38,7 @@ const mocks = vi.hoisted(() => ({
     jump: vi.fn(),
     start: vi.fn(),
     reset: vi.fn(),
+    fetchSession: vi.fn(),
   },
   presets: {
     presets: [] as unknown[],
@@ -47,11 +48,21 @@ const mocks = vi.hoisted(() => ({
     fetchPresets: vi.fn(),
     selectPreset: vi.fn(),
   },
+  auth: { isAdmin: false, isAuthenticated: true, initialized: true, check: vi.fn() },
+  router: { push: vi.fn(), replace: vi.fn() },
 }))
 
-vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }) }))
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ query: {}, fullPath: '/' }),
+  useRouter: () => mocks.router,
+}))
+vi.mock('@/api/session', () => ({
+  persistCandidateToken: vi.fn(),
+  readCandidateToken: vi.fn(() => null),
+}))
 vi.mock('@/stores/session', () => ({ useSessionStore: () => mocks.session }))
 vi.mock('@/stores/presets', () => ({ usePresetsStore: () => mocks.presets }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => mocks.auth }))
 vi.mock('@/stores/timer', () => ({ useTimerStore: () => mocks.timer }))
 vi.mock('@/composables/useConfirm', () => ({ useConfirm: () => ({ confirm: mocks.confirm }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ push: mocks.push }) }))
@@ -146,6 +157,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.tabsState.activeTab = 'desktop'
   mocks.session.isActive = true
+  mocks.auth.isAuthenticated = true
 })
 
 afterEach(() => {
@@ -182,6 +194,20 @@ describe('CandidateView reload action', () => {
     await expect(emitAction(wrapper, 'reload')).resolves.toBeUndefined()
     expect(mocks.terminal.reconnect).not.toHaveBeenCalled()
     expect(mocks.vnc.reload).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('redirects an unauthenticated visitor with no invitation to login', async () => {
+    mocks.auth.isAuthenticated = false
+    mocks.session.isActive = false
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(mocks.router.replace).toHaveBeenCalledWith({
+      name: 'login',
+      query: { redirect: '/' },
+    })
     wrapper.unmount()
   })
 })

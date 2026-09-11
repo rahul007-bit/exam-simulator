@@ -7,8 +7,8 @@ import { apiRequest, getApiBaseUrl } from './client'
  * `web/server.py` (`core/recorder.py` is the source of truth for the shapes):
  *
  *   GET /api/recordings                 -> { recordings, total }
- *   GET /api/recordings/{id}            -> metadata + events + task_timeline
- *   GET /api/recordings/{id}/cast       -> asciinema v2 `.cast` (text)
+ *   GET /api/recordings/{id}            -> metadata + events + task_timeline + channels
+ *   GET /api/recordings/{id}/cast       -> asciinema v2 `.cast` (text, `?channel=`)
  *   GET /api/recordings/{id}/events     -> { session_id, events, total }
  *
  * The list/detail payloads come from `*.meta.json` files and are intentionally
@@ -43,6 +43,18 @@ export interface RecordingListResponse {
   total: number
 }
 
+/**
+ * One per-channel cast entry from `GET /api/recordings/{id}`.
+ *
+ * Channels are `user-web`, `admin-web` and `user-desktop`; a channel that was
+ * never attached (or has no cast on disk) reports `has_cast: false`.
+ */
+export interface RecordingChannel {
+  id: string
+  has_cast: boolean
+  cast_size_bytes: number
+}
+
 /** A single structured event from `*.events.jsonl` (`recorder.log_event`). */
 export interface RecordingEvent {
   timestamp?: string
@@ -51,6 +63,8 @@ export interface RecordingEvent {
   event: string
   actor?: string
   session_id?: string
+  /** Terminal channel the event originated from (older events omit it). */
+  channel?: string
   data?: Record<string, unknown>
 }
 
@@ -91,6 +105,7 @@ export interface RecordingDetail extends RecordingSummary {
   task_timeline: TaskTimelineEntry[]
   has_cast: boolean
   cast_size_bytes: number
+  channels?: RecordingChannel[]
   scorecard?: unknown
 }
 
@@ -106,18 +121,22 @@ export function listRecordings(signal?: AbortSignal): Promise<RecordingListRespo
 }
 
 /** Full metadata + event log + task timeline for one session. */
-export function getRecording(
-  sessionId: string,
-  signal?: AbortSignal,
-): Promise<RecordingDetail> {
+export function getRecording(sessionId: string, signal?: AbortSignal): Promise<RecordingDetail> {
   return apiRequest<RecordingDetail>(`/api/recordings/${encodeURIComponent(sessionId)}`, {
     signal,
   })
 }
 
-/** Raw asciinema v2 `.cast` text for one session. */
-export function getRecordingCast(sessionId: string, signal?: AbortSignal): Promise<string> {
-  return apiRequest<string>(`/api/recordings/${encodeURIComponent(sessionId)}/cast`, { signal })
+/** Raw asciinema v2 `.cast` text for one session/channel (default `user-web`). */
+export function getRecordingCast(
+  sessionId: string,
+  channel?: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  return apiRequest<string>(`/api/recordings/${encodeURIComponent(sessionId)}/cast`, {
+    query: channel ? { channel } : undefined,
+    signal,
+  })
 }
 
 /** Just the structured event log for one session. */
@@ -135,8 +154,9 @@ export function getRecordingEvents(
  * Direct download URL for the `.cast` file (used by `<a download>` links).
  * Built from the shared client base so it honours `VITE_API_BASE`.
  */
-export function recordingCastUrl(sessionId: string): string {
-  return `${getApiBaseUrl()}/api/recordings/${encodeURIComponent(sessionId)}/cast`
+export function recordingCastUrl(sessionId: string, channel?: string): string {
+  const base = `${getApiBaseUrl()}/api/recordings/${encodeURIComponent(sessionId)}/cast`
+  return channel ? `${base}?channel=${encodeURIComponent(channel)}` : base
 }
 
 /** Direct download URL for the exported events JSON. */

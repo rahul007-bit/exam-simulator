@@ -21,9 +21,10 @@ test.describe('FE-042 candidate journey', () => {
   }) => {
     await page.goto('/')
 
-    // Start screen (inactive session).
+    // Start screen (inactive session). FS-008: the preset catalog is admin-only,
+    // so a non-admin candidate sees only Start.
     await expect(page.getByTestId('start-exam')).toBeVisible()
-    await expect(page.getByTestId('choose-preset')).toBeVisible()
+    await expect(page.getByTestId('choose-preset')).toHaveCount(0)
     await expect(page.getByRole('heading', { name: 'Kubernetes Exam Simulator' })).toBeVisible()
 
     await page.getByTestId('start-exam').click()

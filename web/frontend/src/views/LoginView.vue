@@ -11,34 +11,40 @@ const router = useRouter()
 const route = useRoute()
 const { push } = useToast()
 
+const username = ref('')
 const password = ref('')
 const formError = ref<string | null>(null)
 
 /** Only allow same-origin paths (never protocol-relative URLs) as the destination. */
 const redirectTarget = computed(() => {
   const value = route.query.redirect
-  return typeof value === 'string' && value.startsWith('/') && !value.startsWith('//')
-    ? value
-    : '/admin'
+  if (typeof value === 'string' && value.startsWith('/') && !value.startsWith('//')) {
+    return value
+  }
+  return auth.isAdmin ? '/admin' : '/assignments'
 })
 
 async function onSubmit(): Promise<void> {
   formError.value = null
+  if (username.value.trim().length === 0) {
+    formError.value = 'Enter your username.'
+    return
+  }
   if (password.value.length === 0) {
-    formError.value = 'Enter the admin password.'
+    formError.value = 'Enter your password.'
     return
   }
 
-  const ok = await auth.login(password.value)
+  const ok = await auth.login(username.value.trim(), password.value)
   if (!ok) {
-    const detail = auth.error ?? 'Invalid admin password'
+    const detail = auth.error ?? 'Invalid username or password'
     formError.value = detail
     push({ variant: 'error', title: 'Sign-in failed', message: detail })
     return
   }
 
   password.value = ''
-  push({ variant: 'success', message: 'Signed in as administrator' })
+  push({ variant: 'success', message: 'Signed in' })
   await router.replace(redirectTarget.value)
 }
 </script>
@@ -46,22 +52,31 @@ async function onSubmit(): Promise<void> {
 <template>
   <main class="flex min-h-[calc(100vh_-_var(--header-height))] items-center justify-center p-4">
     <Card
-      title="Admin sign-in"
-      subtitle="Enter the administrator password to manage exam sessions."
+      title="Sign in"
+      subtitle="Enter your username and password to continue."
       class="w-full max-w-sm"
       padding="lg"
     >
       <form class="flex flex-col gap-4" novalidate @submit.prevent="onSubmit">
         <Input
+          v-model="username"
+          label="Username"
+          type="text"
+          name="username"
+          autocomplete="username"
+          required
+          :disabled="auth.loading"
+        />
+        <Input
           v-model="password"
-          label="Admin password"
+          label="Password"
           type="password"
           name="password"
           autocomplete="current-password"
           required
-          :error="formError ?? undefined"
           :disabled="auth.loading"
         />
+        <p v-if="formError" role="alert" class="text-xs text-danger-text">{{ formError }}</p>
         <Button type="submit" variant="primary" block :loading="auth.loading">Sign in</Button>
       </form>
     </Card>

@@ -330,6 +330,12 @@ export async function mockCandidateBackend(page: Page): Promise<void> {
   await mockApi(page, [
     { path: '/api/session', body: INACTIVE_SESSION },
     { path: '/api/timer', body: { active: false } },
+    // FS-008/FS-002: a signed-in candidate (no catalog access) so the start
+    // screen renders Start without the admin-only preset picker.
+    {
+      path: '/api/auth/me',
+      body: { username: 'candidate', role: 'user', authenticated: true },
+    },
     { path: '/api/presets', body: { presets: [PRESET], selected: PRESET.filename } },
     {
       path: '/api/start',

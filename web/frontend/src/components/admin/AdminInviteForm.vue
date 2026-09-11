@@ -20,14 +20,16 @@ const props = withDefaults(
     options: SelectOption[]
     invite?: CreateSessionInviteResponse | null
     creating?: boolean
+    starting?: boolean
     disabled?: boolean
   }>(),
-  { invite: null, creating: false, disabled: false },
+  { invite: null, creating: false, starting: false, disabled: false },
 )
 
 const emit = defineEmits<{
   create: [preset: string]
   copy: [url: string]
+  start: [token: string]
 }>()
 
 const preset = ref('')
@@ -43,6 +45,11 @@ function onGenerate(): void {
 function onCopy(): void {
   if (!displayUrl.value) return
   emit('copy', displayUrl.value)
+}
+
+function onStart(): void {
+  if (busy.value || props.starting || !props.invite?.token) return
+  emit('start', props.invite.token)
 }
 </script>
 
@@ -89,10 +96,20 @@ function onCopy(): void {
         {{ displayUrl }}
       </span>
 
-      <div class="flex justify-end">
+      <div class="flex justify-end gap-2">
         <Button variant="secondary" size="sm" data-testid="invite-copy" @click="onCopy">
           <Icon name="copy" :size="14" class="flex-none" />
           Copy link
+        </Button>
+        <Button
+          variant="primary"
+          size="sm"
+          :loading="starting"
+          :disabled="busy || starting"
+          data-testid="invite-start"
+          @click="onStart"
+        >
+          Start now
         </Button>
       </div>
     </div>

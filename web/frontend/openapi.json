@@ -11,7 +11,8 @@
     { "name": "timer" },
     { "name": "presets" },
     { "name": "actions" },
-    { "name": "admin" }
+    { "name": "admin" },
+    { "name": "auth" }
   ],
   "paths": {
     "/api/session": {
@@ -476,6 +477,112 @@
           "401": { "$ref": "#/components/responses/Error" }
         }
       }
+    },
+    "/api/auth/login": {
+      "post": {
+        "operationId": "authLogin",
+        "tags": ["auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/LoginRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authenticated; sets the HttpOnly cka_auth_token cookie",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/LoginResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "operationId": "authLogout",
+        "tags": ["auth"],
+        "responses": {
+          "200": {
+            "description": "Logged out; clears the cka_auth_token cookie",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AuthLogoutResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "operationId": "authMe",
+        "tags": ["auth"],
+        "responses": {
+          "200": {
+            "description": "Authenticated user session",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AuthMeResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "No user session",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AuthMeUnauthenticated" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/users": {
+      "get": {
+        "operationId": "listAdminUsers",
+        "tags": ["admin"],
+        "responses": {
+          "200": {
+            "description": "All users (admin only)",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AdminUsersResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Error" }
+        }
+      },
+      "post": {
+        "operationId": "adminCreateUser",
+        "tags": ["admin"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateUserRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Created user (admin only)",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CreateUserResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" }
+        }
+      }
     }
   },
   "components": {
@@ -928,6 +1035,87 @@
           "sessions": {
             "type": "array",
             "items": { "$ref": "#/components/schemas/AdminSessionItem" }
+          },
+          "total": { "type": "integer" }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": ["username", "password"],
+        "properties": {
+          "username": { "type": "string" },
+          "password": { "type": "string" }
+        }
+      },
+      "LoginResponse": {
+        "type": "object",
+        "required": ["status", "username", "role"],
+        "properties": {
+          "status": { "type": "string" },
+          "username": { "type": "string" },
+          "role": { "type": "string" }
+        }
+      },
+      "AuthLogoutResponse": {
+        "type": "object",
+        "required": ["status", "authenticated"],
+        "properties": {
+          "status": { "type": "string" },
+          "authenticated": { "type": "boolean" }
+        }
+      },
+      "AuthMeResponse": {
+        "type": "object",
+        "required": ["username", "role", "authenticated"],
+        "properties": {
+          "username": { "type": "string" },
+          "role": { "type": "string" },
+          "authenticated": { "type": "boolean" }
+        }
+      },
+      "AuthMeUnauthenticated": {
+        "type": "object",
+        "required": ["authenticated"],
+        "properties": {
+          "authenticated": { "type": "boolean" }
+        }
+      },
+      "CreateUserRequest": {
+        "type": "object",
+        "required": ["username", "password"],
+        "properties": {
+          "username": { "type": "string" },
+          "password": { "type": "string" },
+          "role": { "type": "string", "default": "user" }
+        }
+      },
+      "User": {
+        "type": "object",
+        "required": ["username", "role", "created_at"],
+        "properties": {
+          "username": { "type": "string" },
+          "role": {
+            "type": "string",
+            "enum": ["admin", "user"]
+          },
+          "created_at": { "type": "string" }
+        }
+      },
+      "CreateUserResponse": {
+        "type": "object",
+        "required": ["status", "user"],
+        "properties": {
+          "status": { "type": "string" },
+          "user": { "$ref": "#/components/schemas/User" }
+        }
+      },
+      "AdminUsersResponse": {
+        "type": "object",
+        "required": ["users", "total"],
+        "properties": {
+          "users": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/User" }
           },
           "total": { "type": "integer" }
         }

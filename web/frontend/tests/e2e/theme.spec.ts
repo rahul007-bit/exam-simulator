@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test'
 
+import { mockCandidateBackend } from './helpers'
+
 /** WCAG relative luminance + contrast ratio of body text vs page background. */
 async function bodyContrast(page: import('@playwright/test').Page): Promise<number> {
   return page.evaluate(() => {
@@ -23,6 +25,8 @@ async function bodyContrast(page: import('@playwright/test').Page): Promise<numb
 }
 
 test('FE-002 T2: theme toggle flips, persists across reload and stays AA', async ({ page }) => {
+  // `/` is auth-gated now; mock a signed-in candidate so it renders the shell.
+  await mockCandidateBackend(page)
   await page.goto('/')
 
   const toggle = page.getByRole('button', { name: /switch to (light|dark) theme/i })
@@ -37,9 +41,10 @@ test('FE-002 T2: theme toggle flips, persists across reload and stays AA', async
   await toggle.click()
   const flipped = await page.evaluate(() => document.documentElement.dataset.theme)
   expect(flipped).not.toBe(initial)
-  expect(await bodyContrast(page)).toBeGreaterThanOrEqual(4.5)
+  // Colour transitions may still be settling immediately after the click.
+  await expect.poll(() => bodyContrast(page)).toBeGreaterThanOrEqual(4.5)
 
   await page.reload()
   await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe(flipped)
-  expect(await bodyContrast(page)).toBeGreaterThanOrEqual(4.5)
+  await expect.poll(() => bodyContrast(page)).toBeGreaterThanOrEqual(4.5)
 })

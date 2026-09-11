@@ -57,3 +57,14 @@ export function createSessionInvite(preset?: string): Promise<CreateSessionInvit
 export function listAdminSessions(): Promise<AdminSessionsResponse> {
   return apiRequest<AdminSessionsResponse>('/api/admin/sessions')
 }
+
+/** Send an admin notification popup to a candidate's desktop (identifier = session id or token). */
+export function notifySession(
+  identifier: string,
+  message: string,
+): Promise<{ status: string; session_id: string; published: boolean }> {
+  return apiRequest<{ status: string; session_id: string; published: boolean }>(
+    `/api/admin/sessions/${encodeURIComponent(identifier)}/notify`,
+    { method: 'POST', body: { message } },
+  )
+}

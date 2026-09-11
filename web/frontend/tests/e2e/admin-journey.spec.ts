@@ -5,29 +5,21 @@ import { mockAdminBackend } from './helpers'
 /**
  * FE-042 T1 — admin critical path.
  *
- * Authenticated admin (`/api/admin/check`) loads `/admin` against mocked
- * fixtures: the sessions table, the default-preset + resource forms, the
- * row-action dialog (terminate, with its confirm step) and the create-invite
- * flow. No live backend is required.
+ * Authenticated admin (`/api/admin/check`) exercises both surfaces against
+ * mocked fixtures: `/admin` (sessions table + row-action dialog) and
+ * `/admin/settings` (default-preset, server-resource and create-invite forms).
+ * No live backend is required.
  */
 test.describe('FE-042 admin journey', () => {
   test.beforeEach(async ({ page }) => {
     await mockAdminBackend(page)
   })
 
-  test('T1: lists sessions, edits config and runs row + invite actions', async ({ page }) => {
+  test('T1: lists sessions, runs row actions and settings invite flow', async ({ page }) => {
     await page.goto('/admin')
 
-    // Admin surface + config/resource forms.
+    // Sessions surface.
     await expect(page.getByRole('heading', { name: 'Admin plane' })).toBeVisible()
-    await expect(page.getByRole('heading', { name: 'Default preset' })).toBeVisible()
-    await expect(page.getByRole('heading', { name: 'Server resources' })).toBeVisible()
-    await expect(page.getByRole('heading', { name: 'Create candidate invite' })).toBeVisible()
-    await expect(page.getByTestId('config-save')).toBeVisible()
-    await expect(page.getByTestId('resources-max-input')).toBeVisible()
-    await expect(page.getByTestId('resources-save')).toBeVisible()
-
-    // Sessions table renders the mocked row.
     const row = page.getByTestId('datatable-row').first()
     await expect(row).toContainText('Mock Exam')
 
@@ -44,6 +36,16 @@ test.describe('FE-042 admin journey', () => {
     await expect(
       page.locator('.toast').filter({ hasText: 'Terminated sess-admin-1' }),
     ).toBeVisible()
+
+    // Navigate to the settings page.
+    await page.getByTestId('admin-settings-link').click()
+    await expect(page).toHaveURL(/\/admin\/settings$/)
+    await expect(page.getByRole('heading', { name: 'Default preset' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Server resources' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Create candidate invite' })).toBeVisible()
+    await expect(page.getByTestId('config-save')).toBeVisible()
+    await expect(page.getByTestId('resources-max-input')).toBeVisible()
+    await expect(page.getByTestId('resources-save')).toBeVisible()
 
     // Create-invite flow.
     await page.getByTestId('invite-generate').click()

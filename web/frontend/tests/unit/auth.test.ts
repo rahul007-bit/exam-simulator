@@ -2,7 +2,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { getAdminToken, setAdminToken } from '@/api/client'
-import { ADMIN_ROLE, useAuthStore } from '@/stores/auth'
+import { ADMIN_ROLE, USER_ROLE, useAuthStore } from '@/stores/auth'
 import router, { authGuard } from '@/router'
 import { clear as clearToasts } from '@/composables/useToast'
 import type { RouteLocationNormalized } from 'vue-router'
@@ -35,14 +35,104 @@ afterEach(() => {
   setAdminToken(null)
 })
 
-describe('auth store (FE-030)', () => {
+describe('auth store (FS-002 user login)', () => {
+  it('logs in with username + password and stores username/roles', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ status: 'ok', username: 'alice', role: USER_ROLE }),
+    )
+    const auth = useAuthStore()
+
+    const ok = await auth.login('alice', 'secret')
+
+    expect(ok).toBe(true)
+    expect(auth.isAuthenticated).toBe(true)
+    expect(auth.username).toBe('alice')
+    expect(auth.roles).toEqual([USER_ROLE])
+    expect(auth.isAdmin).toBe(false)
+    expect(auth.initialized).toBe(true)
+    expect(auth.error).toBeNull()
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/auth/login')
+    expect(init.method).toBe('POST')
+    expect(init.body).toBe(JSON.stringify({ username: 'alice', password: 'secret' }))
+    expect(init.credentials).toBe('include')
+  })
+
+  it('clears the session and records the error on failed login', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ detail: 'Invalid credentials' }, 401))
+    const auth = useAuthStore()
+
+    const ok = await auth.login('alice', 'wrong')
+
+    expect(ok).toBe(false)
+    expect(auth.isAuthenticated).toBe(false)
+    expect(auth.username).toBeNull()
+    expect(auth.roles).toEqual([])
+    expect(auth.error).toBe('Invalid credentials')
+  })
+
+  it('prefers /api/auth/me when it reports an authenticated user', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ username: 'alice', role: USER_ROLE, authenticated: true }),
+    )
+    const auth = useAuthStore()
+
+    const ok = await auth.check()
+
+    expect(ok).toBe(true)
+    expect(auth.username).toBe('alice')
+    expect(auth.roles).toEqual([USER_ROLE])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect((fetchMock.mock.calls[0] as [string])[0]).toBe('/api/auth/me')
+  })
+
+  it('falls back to the legacy admin check when /api/auth/me 401s', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ authenticated: false }, 401))
+      .mockResolvedValueOnce(jsonResponse({ authenticated: true }))
+    const auth = useAuthStore()
+
+    const ok = await auth.check()
+
+    expect(ok).toBe(true)
+    expect(auth.isAuthenticated).toBe(true)
+    expect(auth.isAdmin).toBe(true)
+    expect(auth.username).toBeNull()
+    expect((fetchMock.mock.calls[0] as [string])[0]).toBe('/api/auth/me')
+    expect((fetchMock.mock.calls[1] as [string])[0]).toBe('/api/admin/check')
+  })
+
+  it('clears state and calls both logout endpoints', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ status: 'ok', username: 'alice', role: USER_ROLE }),
+    )
+    const auth = useAuthStore()
+    await auth.login('alice', 'secret')
+    expect(auth.isAuthenticated).toBe(true)
+
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ status: 'ok', authenticated: false }))
+      .mockResolvedValueOnce(jsonResponse({ status: 'ok', authenticated: false }))
+    await auth.logout()
+
+    expect(auth.isAuthenticated).toBe(false)
+    expect(auth.username).toBeNull()
+    expect(auth.roles).toEqual([])
+    expect(getAdminToken()).toBeNull()
+    expect((fetchMock.mock.calls[1] as [string])[0]).toBe('/api/auth/logout')
+    expect((fetchMock.mock.calls[2] as [string])[0]).toBe('/api/admin/logout')
+  })
+})
+
+describe('auth store (FE-030 legacy admin)', () => {
   it('logs in with the correct request and stores the bearer token', async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({ status: 'ok', token: 'tok-123', authenticated: true }),
     )
     const auth = useAuthStore()
 
-    const ok = await auth.login('secret')
+    const ok = await auth.loginAdmin('secret')
 
     expect(ok).toBe(true)
     expect(auth.isAuthenticated).toBe(true)
@@ -62,7 +152,7 @@ describe('auth store (FE-030)', () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ detail: 'Invalid admin password' }, 401))
     const auth = useAuthStore()
 
-    const ok = await auth.login('wrong')
+    const ok = await auth.loginAdmin('wrong')
 
     expect(ok).toBe(false)
     expect(auth.isAuthenticated).toBe(false)
@@ -71,24 +161,11 @@ describe('auth store (FE-030)', () => {
     expect(getAdminToken()).toBeNull()
   })
 
-  it('checks the session via the cookie and records authentication', async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse({ authenticated: true }))
-    const auth = useAuthStore()
-
-    const ok = await auth.check()
-
-    expect(ok).toBe(true)
-    expect(auth.isAuthenticated).toBe(true)
-    expect(auth.initialized).toBe(true)
-
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('/api/admin/check')
-    expect(init.credentials).toBe('include')
-  })
-
   it('clears the bearer token when /api/admin/check is unauthenticated', async () => {
     setAdminToken('stale-token')
-    fetchMock.mockResolvedValueOnce(jsonResponse({ authenticated: false }))
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ authenticated: false }, 401))
+      .mockResolvedValueOnce(jsonResponse({ authenticated: false }))
     const auth = useAuthStore()
 
     const ok = await auth.check()
@@ -96,25 +173,6 @@ describe('auth store (FE-030)', () => {
     expect(ok).toBe(false)
     expect(auth.isAuthenticated).toBe(false)
     expect(getAdminToken()).toBeNull()
-  })
-
-  it('logs out and clears local session state', async () => {
-    fetchMock.mockResolvedValueOnce(
-      jsonResponse({ status: 'ok', token: 'tok-1', authenticated: true }),
-    )
-    const auth = useAuthStore()
-    await auth.login('secret')
-    expect(auth.isAuthenticated).toBe(true)
-
-    fetchMock.mockResolvedValueOnce(jsonResponse({ status: 'ok', authenticated: false }))
-    await auth.logout()
-
-    expect(auth.isAuthenticated).toBe(false)
-    expect(auth.roles).toEqual([])
-    expect(getAdminToken()).toBeNull()
-    const [url, init] = fetchMock.mock.calls[1] as [string, RequestInit]
-    expect(url).toBe('/api/admin/logout')
-    expect(init.method).toBe('POST')
   })
 
   it('still clears local session state when the logout request fails', async () => {
@@ -130,22 +188,25 @@ describe('auth store (FE-030)', () => {
     expect(auth.error).toBe('network down')
   })
 
-  it('evaluates role membership for future FS-002 guards', () => {
+  it('evaluates role membership for FS-002 guards', () => {
     const auth = useAuthStore()
     expect(auth.hasRole(ADMIN_ROLE)).toBe(false)
+    expect(auth.hasRole(USER_ROLE)).toBe(false)
     expect(auth.hasAnyRole([])).toBe(true)
 
     auth.$patch({ authenticated: true, roles: [ADMIN_ROLE] })
 
     expect(auth.hasRole(ADMIN_ROLE)).toBe(true)
-    expect(auth.hasAnyRole(['admin', 'proctor'])).toBe(true)
-    expect(auth.hasAnyRole(['proctor'])).toBe(false)
+    expect(auth.hasAnyRole(['admin', 'user'])).toBe(true)
+    expect(auth.hasAnyRole(['user'])).toBe(false)
   })
 })
 
-describe('auth route guard (FE-030)', () => {
+describe('auth route guard (FE-030 / FS-002)', () => {
   it('redirects unauthenticated /admin to /login with the intended path', async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse({ authenticated: false }))
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ authenticated: false }, 401))
+      .mockResolvedValueOnce(jsonResponse({ authenticated: false }))
     setActivePinia(createPinia())
 
     const result = await authGuard(routeAt({ requiresAuth: true, roles: ['admin'] }))
@@ -155,12 +216,38 @@ describe('auth route guard (FE-030)', () => {
   })
 
   it('allows an authenticated admin through', async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse({ authenticated: true }))
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ authenticated: false }, 401))
+      .mockResolvedValueOnce(jsonResponse({ authenticated: true }))
     setActivePinia(createPinia())
 
     const result = await authGuard(routeAt({ requiresAuth: true, roles: ['admin'] }))
 
     expect(result).toBe(true)
+  })
+
+  it('allows a user into a shared user/admin route', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ username: 'alice', role: USER_ROLE, authenticated: true }),
+    )
+    setActivePinia(createPinia())
+
+    const result = await authGuard(
+      routeAt({ requiresAuth: true, roles: ['admin', 'user'] }, '/assignments'),
+    )
+
+    expect(result).toBe(true)
+  })
+
+  it('rejects a user from an admin-only route', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ username: 'alice', role: USER_ROLE, authenticated: true }),
+    )
+    setActivePinia(createPinia())
+
+    const result = await authGuard(routeAt({ requiresAuth: true, roles: ['admin'] }))
+
+    expect(result).toEqual({ name: 'login', query: { redirect: '/admin' } })
   })
 
   it('leaves public routes untouched without probing the backend', async () => {
@@ -173,7 +260,9 @@ describe('auth route guard (FE-030)', () => {
   })
 
   it('redirects via the router to /login for unauthenticated /admin', async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse({ authenticated: false }))
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ authenticated: false }, 401))
+      .mockResolvedValueOnce(jsonResponse({ authenticated: false }))
     setActivePinia(createPinia())
 
     await router.push('/admin')
@@ -183,7 +272,9 @@ describe('auth route guard (FE-030)', () => {
   })
 
   it('navigates to /admin once authenticated', async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse({ authenticated: true }))
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ authenticated: false }, 401))
+      .mockResolvedValueOnce(jsonResponse({ authenticated: true }))
     setActivePinia(createPinia())
 
     await router.push('/admin')

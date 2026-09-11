@@ -82,18 +82,43 @@ const {
   terminal: terminalRef,
   onOpen: () => {
     fitTerminal()
-    sendResize()
   },
 })
 
+function isVisible(): boolean {
+  const container = containerRef.value
+  return !!container && container.clientWidth > 0 && container.clientHeight > 0
+}
+
 function fitTerminal(): void {
   const fitAddon = fitAddonRef.value
-  if (!fitAddon) return
+  const term = terminalRef.value
+  if (!fitAddon || !term || !isVisible()) return
   try {
     fitAddon.fit()
   } catch {
-    /* hidden or zero-size container; the next resize re-fits */
+    /* transient layout; the next resize re-fits */
+    return
   }
+  if (connected.value) {
+    // A refit changes the viewport: tell the remote shell and repaint so the
+    // prompt reflows cleanly (fixes the broken prompt on tab switches).
+    sendResize()
+    try {
+      term.refresh(0, term.rows - 1)
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+let hasConnected = false
+
+function maybeConnect(): void {
+  if (!props.autoConnect || hasConnected || !isVisible()) return
+  hasConnected = true
+  fitTerminal()
+  connect()
 }
 
 function handleWindowResize(): void {
@@ -102,7 +127,10 @@ function handleWindowResize(): void {
 
 function observeContainer(container: HTMLDivElement): void {
   if (typeof ResizeObserver !== 'undefined') {
-    resizeObserver = new ResizeObserver(() => fitTerminal())
+    resizeObserver = new ResizeObserver(() => {
+      fitTerminal()
+      maybeConnect()
+    })
     resizeObserver.observe(container)
   }
   window.addEventListener('resize', handleWindowResize)
@@ -129,10 +157,13 @@ onMounted(() => {
   term.open(container)
   observeContainer(container)
 
+  // Never connect while hidden/zero-size: the server replays scrollback and
+  // spawns the shell at the negotiated size, so an unlaid-out terminal would
+  // render a duplicated/mis-wrapped prompt.
   connectFrame = window.requestAnimationFrame(() => {
     connectFrame = null
     fitTerminal()
-    if (props.autoConnect) connect()
+    maybeConnect()
   })
 })
 
@@ -142,7 +173,8 @@ watch(
     if (next === previous || !terminalRef.value) return
     if (props.autoConnect) {
       disconnect()
-      connect()
+      hasConnected = false
+      maybeConnect()
     }
   },
 )

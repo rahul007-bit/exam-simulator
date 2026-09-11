@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import type { SubmitResponse } from '@/api/actions'
 import { persistCandidateToken, readCandidateToken } from '@/api/session'
 import ExamScorecard from '@/components/candidate/ExamScorecard.vue'
-import PresetModal from '@/components/candidate/PresetModal.vue'
 import RecordingsModal from '@/components/candidate/RecordingsModal.vue'
 import TaskPane from '@/components/candidate/TaskPane.vue'
 import FullscreenGuard from '@/components/FullscreenGuard.vue'
@@ -18,8 +17,8 @@ import WorkspaceTabs from '@/components/workspace/WorkspaceTabs.vue'
 import { useConfirm } from '@/composables/useConfirm'
 import { useFullscreen } from '@/composables/useFullscreen'
 import { useToast } from '@/composables/useToast'
-import { usePresetsStore } from '@/stores/presets'
 import { useSessionStore } from '@/stores/session'
+import { useAuthStore } from '@/stores/auth'
 import { useTimerStore } from '@/stores/timer'
 
 /**
@@ -35,18 +34,23 @@ import { useTimerStore } from '@/stores/timer'
  */
 
 const route = useRoute()
+const router = useRouter()
 const session = useSessionStore()
-const presets = usePresetsStore()
+const auth = useAuthStore()
 const timer = useTimerStore()
 const { push } = useToast()
 const { confirm } = useConfirm()
 
-const presetOpen = ref(false)
 const scorecard = ref<SubmitResponse | null>(null)
 const scorecardOpen = ref(false)
 const recordingsOpen = ref(false)
 
 const token = computed(() => (typeof route.query.token === 'string' ? route.query.token : undefined))
+
+// FS-008: `/` is not a public landing page. Until the auth session (and any
+// resumable session) is resolved we render a spinner, then either continue or
+// redirect to /login.
+const authReady = ref(false)
 
 const active = computed(() => session.isActive)
 const sessionId = computed(() => session.sessionId)
@@ -80,15 +84,27 @@ watch(
   },
 )
 
-onMounted(() => {
-  void presets.fetchPresets()
-  // A `?token=` deep link must be persisted and fetched so a refresh re-attaches
-  // to the invited session instead of the global one.
+onMounted(async () => {
+  // FS-008: `/` is not a public landing page. Resolve auth and any resumable
+  // session first; without an invitation, a live session or a sign-in, redirect
+  // to the login page (invitation links and signed-in users continue normally).
+  if (!auth.initialized) await auth.check()
+
   const queryToken = token.value
   if (queryToken) {
     persistCandidateToken(queryToken)
-    void session.fetchSession({ token: queryToken })
+    await session.fetchSession({ token: queryToken })
+  } else {
+    const resumeToken = readCandidateToken()
+    if (resumeToken) await session.fetchSession({ token: resumeToken })
   }
+
+  if (!auth.isAuthenticated && !token.value && !session.isActive) {
+    void router.replace({ name: 'login', query: { redirect: route.fullPath } })
+    return
+  }
+
+  authReady.value = true
 })
 
 async function onFlag(): Promise<void> {
@@ -152,7 +168,6 @@ async function onStart(): Promise<void> {
   fullscreen.enter()
   if (token.value) persistCandidateToken(token.value)
   const response = await session.start({
-    preset: presets.selected ?? undefined,
     candidate_token: token.value,
   })
   if (!response && session.error) push({ variant: 'error', message: session.error })
@@ -167,26 +182,6 @@ async function onRetryLocked(): Promise<void> {
   const resumeToken = token.value ?? readCandidateToken() ?? undefined
   await session.fetchSession(resumeToken ? { token: resumeToken } : undefined)
   if (session.error) push({ variant: 'error', message: session.error })
-}
-
-async function openPresetModal(): Promise<void> {
-  presetOpen.value = true
-  if (presets.presets.length === 0) await presets.fetchPresets()
-}
-
-async function onPresetSelect(filename: string): Promise<void> {
-  fullscreen.enter()
-  const selected = await presets.selectPreset(filename)
-  if (!selected) {
-    push({ variant: 'error', message: presets.error ?? 'Could not select preset' })
-    return
-  }
-  const response = await session.start(
-    filename === 'all'
-      ? { all_questions: true, candidate_token: token.value }
-      : { preset: filename, candidate_token: token.value },
-  )
-  if (!response && session.error) push({ variant: 'error', message: session.error })
 }
 
 async function onCopySessionId(): Promise<void> {
@@ -338,6 +333,15 @@ async function onAction(id: OverflowAction): Promise<void> {
         </Card>
       </div>
 
+      <div
+        v-else-if="!authReady"
+        class="flex h-full items-center justify-center p-6"
+        role="status"
+        data-testid="candidate-resolving"
+      >
+        <Spinner decorative />
+      </div>
+
       <div v-else class="flex h-full items-center justify-center p-6">
         <Card
           title="Kubernetes Exam Simulator"
@@ -351,7 +355,7 @@ async function onAction(id: OverflowAction): Promise<void> {
                 {{
                   session.isInvited
                     ? 'You have an assigned exam.'
-                    : 'Choose an exam preset to run.'
+                    : 'Start the assigned exam to begin.'
                 }}
               </p>
             </div>
@@ -367,11 +371,10 @@ async function onAction(id: OverflowAction): Promise<void> {
               </Button>
               <Button
                 variant="secondary"
-                :disabled="session.loading"
-                data-testid="choose-preset"
-                @click="openPresetModal"
+                data-testid="go-assignments"
+                @click="router.push('/assignments')"
               >
-                Choose preset
+                My assignments
               </Button>
             </div>
 
@@ -389,14 +392,6 @@ async function onAction(id: OverflowAction): Promise<void> {
       </div>
     </div>
   </AppShell>
-
-  <PresetModal
-    v-model="presetOpen"
-    :presets="presets.presets"
-    :selected="presets.selected"
-    :loading="presets.loading"
-    @select="onPresetSelect"
-  />
 
   <Modal v-model="scorecardOpen" title="Exam results" size="lg">
     <ExamScorecard :result="scorecard" />

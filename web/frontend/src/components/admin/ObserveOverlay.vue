@@ -4,9 +4,10 @@ import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
 import RecordingsModal from '@/components/candidate/RecordingsModal.vue'
 import WorkspaceSplit from '@/components/layout/WorkspaceSplit.vue'
-import { Badge, Button } from '@/components/ui'
+import { Badge, Button, Input, Modal } from '@/components/ui'
 import NoVncFrame from '@/components/workspace/NoVncFrame.vue'
 import XTerm from '@/components/workspace/XTerm.vue'
+import { notifySession } from '@/api/admin'
 import { useConfirm } from '@/composables/useConfirm'
 import { useObserve } from '@/composables/useObserve'
 import type { ObserveAction, ObserveActionResult } from '@/composables/useObserve'
@@ -80,6 +81,10 @@ const terminalRef = useTemplateRef<TerminalHandle>('terminal')
 const activeTab = ref<ObserveTab>('desktop')
 /** Review & replay dialog (legacy `observeReviewAndReplay`). */
 const reviewOpen = ref(false)
+/** Admin -> candidate desktop notification. */
+const notifyOpen = ref(false)
+const notifyMessage = ref('')
+const notifying = ref(false)
 
 const currentTask = computed(() => detail.value?.current_task ?? null)
 
@@ -127,6 +132,26 @@ function close(): void {
 function openReview(): void {
   if (!ready.value) return
   reviewOpen.value = true
+}
+
+async function sendNotification(): Promise<void> {
+  const message = notifyMessage.value.trim()
+  if (!message || !ready.value) return
+  notifying.value = true
+  try {
+    await notifySession(props.sessionId, message)
+    push({ variant: 'success', message: 'Notification sent to the candidate desktop' })
+    notifyOpen.value = false
+    notifyMessage.value = ''
+  } catch (cause) {
+    push({
+      variant: 'error',
+      title: 'Could not send notification',
+      message: describeError(cause),
+    })
+  } finally {
+    notifying.value = false
+  }
 }
 
 function showTab(tab: ObserveTab): void {
@@ -256,6 +281,15 @@ watch(
             @click="openReview"
           >
             Review &amp; replay
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            :disabled="!ready"
+            data-testid="observe-notify"
+            @click="notifyOpen = true"
+          >
+            Notify
           </Button>
           <Button
             variant="secondary"
@@ -468,6 +502,27 @@ watch(
           :show-list="false"
         />
       </Teleport>
+
+      <Modal v-model="notifyOpen" title="Notify candidate" size="sm" data-testid="observe-notify-modal">
+        <Input
+          v-model="notifyMessage"
+          label="Message"
+          placeholder="e.g. 10 minutes remaining"
+          data-testid="observe-notify-message"
+        />
+        <template #footer>
+          <Button variant="secondary" @click="notifyOpen = false">Cancel</Button>
+          <Button
+            variant="primary"
+            :loading="notifying"
+            :disabled="!notifyMessage.trim()"
+            data-testid="observe-notify-send"
+            @click="sendNotification"
+          >
+            Send
+          </Button>
+        </template>
+      </Modal>
     </div>
   </Teleport>
 </template>

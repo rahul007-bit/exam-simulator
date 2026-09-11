@@ -76,14 +76,10 @@ function expectNoCritical(violations: AxeViolation[]): void {
  * PROTOCOL §6; run it with `npx playwright test tests/e2e/a11y.spec.ts`.
  */
 test.describe('FE-042 axe accessibility', () => {
-  test('T2: candidate route + preset modal have no critical violations', async ({ page }) => {
+  test('T2: candidate route has no critical violations', async ({ page }) => {
     await mockCandidateBackend(page)
     await page.goto('/')
     await expect(page.getByTestId('start-exam')).toBeVisible()
-    expectNoCritical(await criticalViolations(page))
-
-    await page.getByTestId('choose-preset').click()
-    await expect(page.getByTestId('preset-list')).toBeVisible()
     expectNoCritical(await criticalViolations(page))
   })
 

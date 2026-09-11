@@ -20,8 +20,10 @@ declare module 'vue-router' {
   }
 }
 
-// NOTE: /dashboard and /exam/:sessionId are placeholders reserved for the
-// future auth + per-user assignment scope (see decisions.md D-009 / FS-* tasks).
+// NOTE: /assignments (the signed-in user's exams) and /exam/:sessionId are the
+// auth + per-user assignment scope (see decisions.md D-009/D-011 / FS-* tasks).
+// `/dashboard` is reserved by Traefik (its own dashboard), so the SPA must not
+// use it.
 const routes: RouteRecordRaw[] = [
   { path: '/', name: 'candidate', component: CandidateView },
   {
@@ -30,16 +32,24 @@ const routes: RouteRecordRaw[] = [
     component: AdminView,
     meta: { requiresAuth: true, roles: ['admin'] },
   },
+  {
+    path: '/admin/settings',
+    name: 'admin-settings',
+    component: () => import('@/views/AdminSettingsView.vue'),
+    meta: { requiresAuth: true, roles: ['admin'] },
+  },
   { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue') },
   {
-    path: '/dashboard',
-    name: 'dashboard',
-    component: () => import('@/views/PlaceholderView.vue'),
+    path: '/assignments',
+    name: 'assignments',
+    component: () => import('@/views/DashboardView.vue'),
+    meta: { requiresAuth: true, roles: ['admin', 'user'] },
   },
   {
     path: '/exam/:sessionId',
     name: 'exam',
     component: () => import('@/views/PlaceholderView.vue'),
+    meta: { requiresAuth: true, roles: ['admin', 'user'] },
   },
 ]
 

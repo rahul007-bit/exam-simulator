@@ -36,6 +36,10 @@ test.describe('per-session owner lock', () => {
       },
       { path: '/api/timer', body: { active: false } },
       { path: '/api/presets', body: { presets: [], selected: null } },
+      {
+        path: '/api/auth/me',
+        body: { username: 'candidate', role: 'user', authenticated: true },
+      },
     ])
 
     await page.goto('/')
