@@ -1,12 +1,31 @@
 import type { components } from './schema'
 import { apiRequest } from './client'
 
-export type SessionResponse = components['schemas']['SessionResponse']
 export type SessionActive = components['schemas']['SessionActive']
-export type SessionInactive = components['schemas']['SessionInactive']
+// The inactive payload is hand-augmented with the per-session owner lock flag
+// (`locked: true` means another client/device owns the active session). A locked
+// session is not an error — it is a normal HTTP 200 status.
+export type SessionInactive = components['schemas']['SessionInactive'] & {
+  locked?: boolean
+}
 export type SessionInvited = components['schemas']['SessionInvited']
+export type SessionResponse = SessionActive | SessionInactive | SessionInvited
 export type TaskData = components['schemas']['TaskData']
 export type PresetLockedInfo = components['schemas']['PresetLockedInfo']
+
+/** localStorage key holding the candidate token used to resume a session. */
+export const CANDIDATE_TOKEN_KEY = 'cka:candidate-token'
+
+export function readCandidateToken(): string | null {
+  if (typeof localStorage === 'undefined') return null
+  return localStorage.getItem(CANDIDATE_TOKEN_KEY)
+}
+
+export function persistCandidateToken(token: string | null): void {
+  if (typeof localStorage === 'undefined') return
+  if (token) localStorage.setItem(CANDIDATE_TOKEN_KEY, token)
+  else localStorage.removeItem(CANDIDATE_TOKEN_KEY)
+}
 export type StartRequest = components['schemas']['StartRequest']
 export type StatusMessageResponse = components['schemas']['StatusMessageResponse']
 

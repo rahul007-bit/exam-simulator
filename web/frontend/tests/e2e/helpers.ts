@@ -9,12 +9,18 @@ import type { Page } from '@playwright/test'
  * browser surfaces the app assumes exist (WebSocket, fullscreen, noVNC).
  */
 
+/** Minimal request shape exposed to dynamic fixture factories. */
+export interface ApiRequestInfo {
+  /** Parsed JSON request body (Playwright `Request.postDataJSON`). */
+  postDataJSON: () => unknown
+}
+
 export interface ApiStub {
   /** Exact pathname (e.g. `/api/presets`) or a RegExp for dynamic paths. */
   path: string | RegExp
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE'
   /** Static body, or a factory (sync/async) evaluated per request. */
-  body: unknown
+  body: unknown | ((request: ApiRequestInfo) => unknown)
   status?: number
 }
 
@@ -96,12 +102,29 @@ export function activeSession(index: number) {
   }
 }
 
-const QUESTIONS = {
-  questions: [
-    { task_num: 1, id: 'q1', title: 'Task One', points: 1, is_current: true, is_flagged: false },
-    { task_num: 2, id: 'q2', title: 'Task Two', points: 1, is_current: false, is_flagged: false },
-  ],
-  total: 2,
+/** Navigator rows reflecting whichever task is currently open. */
+function questionsFor(index: number) {
+  return {
+    questions: [
+      {
+        task_num: 1,
+        id: 'q1',
+        title: 'Task One',
+        points: 1,
+        is_current: index === 0,
+        is_flagged: false,
+      },
+      {
+        task_num: 2,
+        id: 'q2',
+        title: 'Task Two',
+        points: 1,
+        is_current: index === 1,
+        is_flagged: false,
+      },
+    ],
+    total: 2,
+  }
 }
 
 const SUBMIT_REPORT = {
@@ -202,7 +225,11 @@ export async function mockApi(
     }
 
     const resolved =
-      typeof stub.body === 'function' ? await (stub.body as () => unknown)() : stub.body
+      typeof stub.body === 'function'
+        ? await (stub.body as (request: ApiRequestInfo) => unknown)(
+            request as unknown as ApiRequestInfo,
+          )
+        : stub.body
     await route.fulfill({
       status: stub.status ?? 200,
       contentType: 'application/json',
@@ -292,19 +319,56 @@ export async function stubBrowserApis(page: Page): Promise<void> {
   )
 }
 
-/** Candidate critical-path fixtures: inactive session -> start -> jump -> submit. */
+/** Candidate critical-path fixtures: inactive session -> start -> navigate -> submit. */
 export async function mockCandidateBackend(page: Page): Promise<void> {
   await stubBrowserApis(page)
+  // Tracks the open task so next/prev/jump fixtures advance deterministically,
+  // and so the navigator rows always mark the current task (mirrors the backend).
+  let currentIndex = 0
+  const clamp = (value: number): number => Math.max(0, Math.min(1, value))
+
   await mockApi(page, [
     { path: '/api/session', body: INACTIVE_SESSION },
     { path: '/api/timer', body: { active: false } },
     { path: '/api/presets', body: { presets: [PRESET], selected: PRESET.filename } },
-    { path: '/api/start', method: 'POST', body: () => activeSession(0) },
-    { path: '/api/questions', body: QUESTIONS },
+    {
+      path: '/api/start',
+      method: 'POST',
+      body: () => {
+        currentIndex = 0
+        return activeSession(currentIndex)
+      },
+    },
+    { path: '/api/questions', body: () => questionsFor(currentIndex) },
     {
       path: '/api/action/jump',
       method: 'POST',
-      body: () => activeSession(1),
+      body: (request: ApiRequestInfo) => {
+        const parsed = request.postDataJSON() as { task_num?: number } | null
+        if (typeof parsed?.task_num === 'number') currentIndex = clamp(parsed.task_num - 1)
+        return activeSession(currentIndex)
+      },
+    },
+    {
+      path: '/api/action/next',
+      method: 'POST',
+      body: () => {
+        currentIndex = clamp(currentIndex + 1)
+        return activeSession(currentIndex)
+      },
+    },
+    {
+      path: '/api/action/prev',
+      method: 'POST',
+      body: () => {
+        currentIndex = clamp(currentIndex - 1)
+        return activeSession(currentIndex)
+      },
+    },
+    {
+      path: '/api/action/retry',
+      method: 'POST',
+      body: { status: 'ok', message: 'Task reset' },
     },
     { path: '/api/action/submit', method: 'POST', body: SUBMIT_REPORT },
   ])

@@ -2,13 +2,14 @@
 import { computed } from 'vue'
 
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
-import { Badge } from '@/components/ui'
+import { Badge, Button, Icon } from '@/components/ui'
 
 import { taskBadges, type TaskPaneTask } from './task'
 
 /**
  * TaskPane (FE-022) — the candidate's left-pane task view: a compact header with
- * metadata/status badges and the sanitized markdown instructions below.
+ * metadata/status badges, the sanitized markdown instructions below, and the
+ * legacy navigation footer (Previous · Reset task · Task X of Y · Next).
  *
  * Colours come from FE-012 tokens only (Badge variants); no raw hex, glow or
  * emoji. The markdown body is delegated to `MarkdownRenderer`, which sanitizes
@@ -21,13 +22,25 @@ const props = withDefaults(
   defineProps<{
     task?: TaskPaneTask | null
     emptyText?: string
+    taskNum?: number
+    totalTasks?: number
+    busy?: boolean
   }>(),
-  { task: null, emptyText: 'No active task.' },
+  { task: null, emptyText: 'No active task.', taskNum: 0, totalTasks: 0, busy: false },
 )
 
-const emit = defineEmits<{ copy: [text: string] }>()
+const emit = defineEmits<{
+  copy: [text: string]
+  prev: []
+  next: []
+  reset: []
+}>()
 
 const badges = computed(() => (props.task ? taskBadges(props.task) : []))
+const prevDisabled = computed(() => props.busy || props.taskNum <= 1)
+const nextDisabled = computed(
+  () => props.busy || (props.totalTasks > 0 && props.taskNum >= props.totalTasks),
+)
 </script>
 
 <template>
@@ -58,5 +71,47 @@ const badges = computed(() => (props.task ? taskBadges(props.task) : []))
       />
       <p v-else class="text-text-muted">{{ emptyText }}</p>
     </div>
+
+    <footer
+      v-if="task"
+      class="flex flex-none items-center gap-2 border-t border-border px-4 py-2"
+      data-testid="task-footer"
+    >
+      <Button
+        variant="secondary"
+        size="sm"
+        :disabled="prevDisabled"
+        data-testid="task-prev"
+        @click="emit('prev')"
+      >
+        <Icon name="chevron-left" :size="16" />
+        Previous
+      </Button>
+      <Button
+        variant="secondary"
+        size="sm"
+        :disabled="busy"
+        data-testid="task-reset"
+        @click="emit('reset')"
+      >
+        Reset task
+      </Button>
+      <span
+        class="flex-1 text-center text-xs tabular-nums text-text-muted"
+        data-testid="task-progress-text"
+      >
+        Task {{ taskNum }} of {{ totalTasks }}
+      </span>
+      <Button
+        variant="secondary"
+        size="sm"
+        :disabled="nextDisabled"
+        data-testid="task-next"
+        @click="emit('next')"
+      >
+        Next
+        <Icon name="chevron-right" :size="16" />
+      </Button>
+    </footer>
   </section>
 </template>

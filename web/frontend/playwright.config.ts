@@ -21,7 +21,14 @@ export default defineConfig({
   webServer: {
     command: 'npm run dev',
     url: `http://localhost:${PORT}`,
-    reuseExistingServer: !process.env.CI,
+    // Never reuse a dev server (which might be proxying to a live backend).
+    // Always start fresh and point the proxy at a dead port; the E2E specs mock
+    // `/api/**` themselves, so tests can never reach a real platform.
+    reuseExistingServer: false,
     timeout: 120_000,
+    env: {
+      ...process.env,
+      VITE_BACKEND: process.env.E2E_BACKEND ?? 'http://127.0.0.1:9',
+    },
   },
 })

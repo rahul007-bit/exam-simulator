@@ -7,15 +7,18 @@ import { mockCandidateBackend } from './helpers'
  *
  * The whole journey runs against mocked `/api/**` fixtures (see `helpers.ts`);
  * there is no live backend. It covers the start screen, starting an exam,
- * rendering the workspace + header, navigating to another task through the
- * question-drawer navigator, and reaching the submit scorecard.
+ * rendering the workspace + header, the task footer Previous/Next controls,
+ * navigating to another task through the question-drawer navigator (including
+ * the reopen/refetch parity fix), and reaching the submit scorecard.
  */
 test.describe('FE-042 candidate journey', () => {
   test.beforeEach(async ({ page }) => {
     await mockCandidateBackend(page)
   })
 
-  test('T1: starts an exam, jumps tasks and renders the submit scorecard', async ({ page }) => {
+  test('T1: starts an exam, navigates tasks and renders the submit scorecard', async ({
+    page,
+  }) => {
     await page.goto('/')
 
     // Start screen (inactive session).
@@ -32,6 +35,25 @@ test.describe('FE-042 candidate journey', () => {
     await expect(page.getByTestId('header-progress')).toContainText('Task 1 of 2')
     await expect(page.getByTestId('header-timer')).toBeVisible()
 
+    // Task footer: at the first task only Next is enabled.
+    await expect(page.getByTestId('task-footer')).toBeVisible()
+    await expect(page.getByTestId('task-progress-text')).toHaveText('Task 1 of 2')
+    await expect(page.getByTestId('task-prev')).toBeDisabled()
+    await expect(page.getByTestId('task-next')).toBeEnabled()
+
+    // Next -> Task 2 (footer + header stay in sync; Next now disabled).
+    await page.getByTestId('task-next').click()
+    await expect(page.getByTestId('header-progress')).toContainText('Task 2 of 2')
+    await expect(page.getByTestId('task-progress-text')).toHaveText('Task 2 of 2')
+    await expect(page.getByTestId('task-next')).toBeDisabled()
+    await expect(page.getByTestId('task-prev')).toBeEnabled()
+    await expect(page.getByRole('heading', { level: 1, name: 'Task Two' })).toBeVisible()
+
+    // Previous -> back to Task 1.
+    await page.getByTestId('task-prev').click()
+    await expect(page.getByTestId('header-progress')).toContainText('Task 1 of 2')
+    await expect(page.getByTestId('task-progress-text')).toHaveText('Task 1 of 2')
+
     // Question drawer / navigator -> jump to the second task.
     await page.getByTestId('header-progress').click()
     await expect(page.getByTestId('question-nav-grid')).toBeVisible()
@@ -42,6 +64,15 @@ test.describe('FE-042 candidate journey', () => {
     await expect(page.getByTestId('question-nav-grid')).toBeHidden()
     await expect(page.getByTestId('header-progress')).toContainText('Task 2 of 2')
     await expect(page.getByRole('heading', { level: 1, name: 'Task Two' })).toBeVisible()
+
+    // Reopen the drawer: the refetch must mark the newly-opened task current.
+    await page.getByTestId('header-progress').click()
+    await expect(page.getByTestId('question-nav-grid')).toBeVisible()
+    const currentItem = page.locator('[data-testid="question-nav-item"][data-state="current"]')
+    await expect(currentItem).toHaveCount(1)
+    await expect(currentItem).toContainText('Task Two')
+    await page.getByRole('button', { name: 'Close' }).click()
+    await expect(page.getByTestId('question-nav-grid')).toBeHidden()
 
     // Submit -> confirm -> scorecard.
     await page.getByTestId('header-submit').click()

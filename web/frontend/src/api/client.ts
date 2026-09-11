@@ -26,6 +26,43 @@ export interface RequestOptions {
   signal?: AbortSignal
 }
 
+/**
+ * Per-browser client id used by the backend session owner lock.
+ *
+ * A non-HttpOnly, path-scoped, 1-year `SameSite=Lax` cookie identifies this
+ * browser across refreshes. It is ensured once on module load so every request
+ * can advertise `X-Client-Id`; the backend 409s when a different client owns the
+ * active session (see the session-lock contract).
+ */
+const CLIENT_ID_COOKIE = 'cka_client_id'
+const CLIENT_ID_MAX_AGE = 31_536_000
+
+function generateClientId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return `cka-${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`
+}
+
+function readClientIdCookie(): string | null {
+  const match = document.cookie.match(/(?:^|;\s*)cka_client_id=([^;]*)/)
+  return match ? decodeURIComponent(match[1]) : null
+}
+
+function ensureClientId(): string {
+  const existing = readClientIdCookie()
+  if (existing) return existing
+  const generated = generateClientId()
+  document.cookie = `${CLIENT_ID_COOKIE}=${encodeURIComponent(generated)}; path=/; max-age=${CLIENT_ID_MAX_AGE}; SameSite=Lax`
+  return generated
+}
+
+const clientId = typeof document !== 'undefined' ? ensureClientId() : generateClientId()
+
+export function getClientId(): string {
+  return clientId
+}
+
 function initialBaseUrl(): string {
   const configured = import.meta.env.VITE_API_BASE as string | undefined
   return configured ?? ''
@@ -85,6 +122,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   const headers: Record<string, string> = { Accept: 'application/json' }
   if (options.body !== undefined) headers['Content-Type'] = 'application/json'
   if (adminToken) headers.Authorization = `Bearer ${adminToken}`
+  headers['X-Client-Id'] = getClientId()
 
   const response = await fetch(buildUrl(path, options.query), {
     method: options.method ?? 'GET',

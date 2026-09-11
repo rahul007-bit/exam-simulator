@@ -28,6 +28,12 @@ export const useSessionStore = defineStore('session', () => {
     const current = data.value
     return current !== null && 'is_admin' in current ? current.is_admin : false
   })
+  const isLocked = computed(() => {
+    const current = data.value
+    return (
+      current !== null && current.active === false && 'locked' in current && current.locked === true
+    )
+  })
   const sessionId = computed(() => (data.value?.active === true ? data.value.session_id : null))
   const currentTask = computed<TaskData | null>(() =>
     data.value?.active === true ? (data.value.current_task ?? null) : null,
@@ -153,6 +159,7 @@ export const useSessionStore = defineStore('session', () => {
     try {
       const report = await actionsApi.actionSubmit()
       clear()
+      sessionApi.persistCandidateToken(null)
       return report
     } catch (cause) {
       error.value = cause instanceof Error ? cause.message : String(cause)
@@ -185,6 +192,7 @@ export const useSessionStore = defineStore('session', () => {
     try {
       await sessionApi.resetSession()
       clear()
+      sessionApi.persistCandidateToken(null)
       return true
     } catch (cause) {
       error.value = cause instanceof Error ? cause.message : String(cause)
@@ -200,6 +208,7 @@ export const useSessionStore = defineStore('session', () => {
     try {
       await sessionApi.endSession()
       clear()
+      sessionApi.persistCandidateToken(null)
       return true
     } catch (cause) {
       error.value = cause instanceof Error ? cause.message : String(cause)
@@ -216,6 +225,7 @@ export const useSessionStore = defineStore('session', () => {
     isActive,
     isInvited,
     isAdmin,
+    isLocked,
     sessionId,
     currentTask,
     currentTaskNum,

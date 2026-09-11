@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 import type { SubmitResponse } from '@/api/actions'
+import { persistCandidateToken, readCandidateToken } from '@/api/session'
 import ExamScorecard from '@/components/candidate/ExamScorecard.vue'
 import PresetModal from '@/components/candidate/PresetModal.vue'
 import RecordingsModal from '@/components/candidate/RecordingsModal.vue'
@@ -81,6 +82,13 @@ watch(
 
 onMounted(() => {
   void presets.fetchPresets()
+  // A `?token=` deep link must be persisted and fetched so a refresh re-attaches
+  // to the invited session instead of the global one.
+  const queryToken = token.value
+  if (queryToken) {
+    persistCandidateToken(queryToken)
+    void session.fetchSession({ token: queryToken })
+  }
 })
 
 async function onFlag(): Promise<void> {
@@ -112,13 +120,53 @@ async function onSelectTask(taskNum: number): Promise<void> {
   if (!response && session.error) push({ variant: 'error', message: session.error })
 }
 
+async function onPrev(): Promise<void> {
+  const response = await session.prev()
+  if (!response && session.error) push({ variant: 'error', message: session.error })
+}
+
+async function onNext(): Promise<void> {
+  const response = await session.next()
+  if (!response && session.error) push({ variant: 'error', message: session.error })
+}
+
+async function onResetTask(): Promise<void> {
+  const ok = await confirm({
+    title: 'Reset task',
+    message:
+      'Reset this task back to its initial problem state? Any changes made to this task will be reset.',
+    confirmLabel: 'Reset task',
+    danger: true,
+  })
+  if (!ok) return
+
+  const reset = await session.retry()
+  if (reset) {
+    push({ variant: 'success', message: 'Task reset' })
+  } else if (session.error) {
+    push({ variant: 'error', message: session.error })
+  }
+}
+
 async function onStart(): Promise<void> {
   fullscreen.enter()
+  if (token.value) persistCandidateToken(token.value)
   const response = await session.start({
     preset: presets.selected ?? undefined,
     candidate_token: token.value,
   })
   if (!response && session.error) push({ variant: 'error', message: session.error })
+}
+
+/**
+ * Owner-lock retry: re-fetch the session (preferring the candidate token) after
+ * the other window/device releases the lock. A locked session is not an error,
+ * so the retry simply reloads the state.
+ */
+async function onRetryLocked(): Promise<void> {
+  const resumeToken = token.value ?? readCandidateToken() ?? undefined
+  await session.fetchSession(resumeToken ? { token: resumeToken } : undefined)
+  if (session.error) push({ variant: 'error', message: session.error })
 }
 
 async function openPresetModal(): Promise<void> {
@@ -240,13 +288,54 @@ async function onAction(id: OverflowAction): Promise<void> {
         <WorkspaceSplit>
           <!-- Left pane: FE-022 task pane -->
           <template #left>
-            <TaskPane :task="currentTaskModel" @copy="onTaskCopy" />
+            <TaskPane
+              :task="currentTaskModel"
+              :task-num="currentTask"
+              :total-tasks="totalTasks"
+              :busy="session.loading"
+              @copy="onTaskCopy"
+              @prev="onPrev"
+              @next="onNext"
+              @reset="onResetTask"
+            />
           </template>
 
           <!-- Right pane (workspace majority): FE-026 Desktop/Terminal workspace
                hosting the noVNC and XTerm islands (both stay mounted). -->
           <WorkspaceTabs ref="workspaceTabs" :session-id="sessionId ?? 'active'" />
         </WorkspaceSplit>
+      </div>
+
+      <div
+        v-else-if="session.isLocked"
+        class="flex h-full items-center justify-center p-6"
+        data-testid="session-locked"
+      >
+        <Card
+          title="This exam is already in progress"
+          subtitle="Active in another window or device"
+          variant="elevated"
+          class="w-full max-w-lg"
+        >
+          <div class="flex flex-col gap-4">
+            <p class="m-0 text-sm text-text-muted">
+              This exam session is active in another window or device. Only one window can work on
+              the exam at a time to protect your progress. Close the other window, or continue
+              there, then retry.
+            </p>
+            <div>
+              <Button
+                variant="primary"
+                :loading="session.loading"
+                :disabled="session.loading"
+                data-testid="session-locked-retry"
+                @click="onRetryLocked"
+              >
+                Retry
+              </Button>
+            </div>
+          </div>
+        </Card>
       </div>
 
       <div v-else class="flex h-full items-center justify-center p-6">

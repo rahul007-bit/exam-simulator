@@ -83,6 +83,7 @@ function cardClass(item: QuestionNavItem): string {
 }
 
 async function loadItems(): Promise<void> {
+  if (internalLoading.value) return
   internalLoading.value = true
   error.value = null
   try {
@@ -104,10 +105,13 @@ function selectTask(item: QuestionNavItem): void {
   close()
 }
 
+// Legacy `openQuestionDrawer()` re-fetched `/api/questions` on every open so the
+// navigator reflects the current task after a jump; mirror that by always
+// reloading (uncontrolled mode) rather than caching the first result.
 watch(
   () => props.modelValue,
   (open) => {
-    if (open && !controlled.value && props.loadOnOpen && loaded.value.length === 0) {
+    if (open && !controlled.value && props.loadOnOpen) {
       void loadItems()
     }
   },

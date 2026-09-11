@@ -1,6 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import QuestionDrawer from '@/components/candidate/QuestionDrawer.vue'
 import {
@@ -177,6 +177,25 @@ describe('QuestionDrawer — FE-024', () => {
     await tick()
 
     expect(wrapper.findAll('[data-testid="question-nav-item"]')).toHaveLength(4)
+    wrapper.unmount()
+  })
+
+  it('re-loads questions on every open so the navigator reflects the current task', async () => {
+    const loader = vi.fn(async (): Promise<QuestionNavItem[]> => ITEMS)
+    const wrapper = mountDrawer({ modelValue: false, load: loader })
+    await tick()
+    expect(loader).not.toHaveBeenCalled()
+
+    await wrapper.setProps({ modelValue: true })
+    await tick()
+    expect(loader).toHaveBeenCalledTimes(1)
+
+    await wrapper.setProps({ modelValue: false })
+    await tick()
+    await wrapper.setProps({ modelValue: true })
+    await tick()
+    expect(loader).toHaveBeenCalledTimes(2)
+
     wrapper.unmount()
   })
 })

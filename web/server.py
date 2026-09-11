@@ -171,6 +171,98 @@ def is_admin_authenticated(req_or_ws) -> bool:
     return False
 
 
+# --- Soft per-session owner lock (per-browser client-id cookie) ---
+
+_CLIENT_ID_COOKIE = "cka_client_id"
+_OWNER_TTL_SECONDS = 86400
+
+
+def _owner_decision(owner, cid, is_admin):
+    """Pure decision for the soft per-session owner lock.
+
+    Returns 'allow', 'claim' or 'reject'. Deliberately free of Redis/FastAPI
+    access so it can be unit-tested directly.
+    """
+    if is_admin:
+        return "allow"
+    if cid is None:
+        # Internal tooling (scripts, curl, background jobs) carries no cookie:
+        # keep today's behaviour (never reject, never claim).
+        return "allow"
+    if owner is None:
+        return "claim"
+    if owner == cid:
+        return "allow"
+    return "reject"
+
+
+def _client_id(request) -> Optional[str]:
+    try:
+        val = request.cookies.get(_CLIENT_ID_COOKIE)
+    except Exception:
+        return None
+    return val or None
+
+
+def _client_id_ws(websocket) -> Optional[str]:
+    try:
+        val = websocket.cookies.get(_CLIENT_ID_COOKIE)
+    except Exception:
+        return None
+    return val or None
+
+
+def _owner_key(sid: str) -> str:
+    return f"session:{sid}:owner"
+
+
+def _get_owner(sid: Optional[str]) -> Optional[str]:
+    if not sid:
+        return None
+    try:
+        val = redis_bus.get_sync_client().get(_owner_key(sid))
+    except Exception:
+        return None
+    if isinstance(val, bytes):
+        val = val.decode()
+    return val or None
+
+
+def _claim_owner(sid: Optional[str], cid: Optional[str]) -> None:
+    if not sid or not cid:
+        return
+    try:
+        redis_bus.get_sync_client().set(_owner_key(sid), cid, ex=_OWNER_TTL_SECONDS)
+    except Exception:
+        pass
+
+
+def _clear_owner(sid: Optional[str]) -> None:
+    if not sid:
+        return
+    try:
+        redis_bus.get_sync_client().delete(_owner_key(sid))
+    except Exception:
+        pass
+
+
+def _owner_mismatch(sid: Optional[str], cid: Optional[str], is_admin: bool) -> bool:
+    """True when a different client owns the session; claims on first touch."""
+    if not sid:
+        return False
+    decision = _owner_decision(_get_owner(sid), cid, is_admin)
+    if decision == "claim":
+        _claim_owner(sid, cid)
+        return False
+    return decision == "reject"
+
+
+def _enforce_owner(request: Request, sid: Optional[str]) -> None:
+    """Raise 409 when the caller is not the owner of the active session."""
+    if sid and _owner_mismatch(sid, _client_id(request), is_admin_authenticated(request)):
+        raise HTTPException(status_code=409, detail="This exam session is active in another window or device.")
+
+
 _running_containers_cache: set = set()
 _last_container_cache_time: float = 0.0
 
@@ -343,6 +435,8 @@ def get_session(request: Request):
     else:
         is_admin = False
 
+    cid = _client_id(request)
+
     # Candidate token routing: resolve session_id from token
     session = None
     if url_token:
@@ -407,6 +501,16 @@ def get_session(request: Request):
             "active": False,
             "session": None,
             "locked_preset": preset_info,
+            "is_admin": is_admin,
+        }
+
+    # Soft per-session owner lock: a different browser may not attach.
+    if _owner_mismatch(session.session_id, cid, admin_auth):
+        return {
+            "active": False,
+            "session": None,
+            "locked": True,
+            "locked_preset": None,
             "is_admin": is_admin,
         }
 
@@ -475,10 +579,11 @@ def get_session(request: Request):
 
 
 @app.get("/api/questions")
-def get_questions():
+def get_questions(request: Request):
     session = deployer.load_active_session(loader)
     if not session:
         return {"questions": []}
+    _enforce_owner(request, session.session_id)
 
     questions_list = []
     for idx, q in enumerate(session.questions):
@@ -500,7 +605,10 @@ def get_questions():
 
 
 @app.get("/api/timer")
-def get_timer():
+def get_timer(request: Request):
+    session = deployer.load_active_session(loader)
+    if session and session.session_id:
+        _enforce_owner(request, session.session_id)
     session_file = deployer.session_file
     if not session_file.exists():
         return {"active": False, "time_remaining_seconds": None}
@@ -558,10 +666,12 @@ def select_preset(req: PresetSelectRequest):
 
 
 @app.post("/api/clipboard")
-def set_clipboard_endpoint(req: ClipboardRequest):
+def set_clipboard_endpoint(req: ClipboardRequest, request: Request):
     global _last_x11_clipboard
     try:
         session = deployer.load_active_session(loader)
+        if session and session.session_id:
+            _enforce_owner(request, session.session_id)
         sid = session.session_id if session else "default"
         _last_x11_clipboard = req.text
         redis_bus.set_clipboard(sid, req.text)
@@ -575,17 +685,23 @@ def set_clipboard_endpoint(req: ClipboardRequest):
             except Exception:
                 pass
         return {"status": "ok", "length": len(req.text)}
+    except HTTPException:
+        raise
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
 
 @app.get("/api/clipboard")
-def get_clipboard_endpoint():
+def get_clipboard_endpoint(request: Request):
     try:
         session = deployer.load_active_session(loader)
+        if session and session.session_id:
+            _enforce_owner(request, session.session_id)
         sid = session.session_id if session else "default"
         text = redis_bus.get_clipboard(sid)
         return {"text": text}
+    except HTTPException:
+        raise
     except Exception as e:
         return {"text": "", "error": str(e)}
 
@@ -612,6 +728,7 @@ def action_next(request: Request):
     session = deployer.load_active_session(loader)
     if not session or not session.questions:
         raise HTTPException(status_code=400, detail="No active exam session")
+    _enforce_owner(request, session.session_id)
 
     next_idx = session.current_index + 1
     if next_idx >= len(session.questions):
@@ -626,6 +743,7 @@ def action_prev(request: Request):
     session = deployer.load_active_session(loader)
     if not session or not session.questions:
         raise HTTPException(status_code=400, detail="No active exam session")
+    _enforce_owner(request, session.session_id)
 
     prev_idx = session.current_index - 1
     if prev_idx < 0:
@@ -640,6 +758,7 @@ def action_jump(req: JumpRequest, request: Request):
     session = deployer.load_active_session(loader)
     if not session or not session.questions:
         raise HTTPException(status_code=400, detail="No active exam session")
+    _enforce_owner(request, session.session_id)
 
     target_idx = req.task_num - 1
     if target_idx < 0 or target_idx >= len(session.questions):
@@ -657,10 +776,11 @@ def action_jump(req: JumpRequest, request: Request):
 
 
 @app.post("/api/action/flag")
-def action_flag(req: FlagRequest):
+def action_flag(req: FlagRequest, request: Request):
     session = deployer.load_active_session(loader)
     if not session or not session.questions:
         raise HTTPException(status_code=400, detail="No active exam session")
+    _enforce_owner(request, session.session_id)
 
     idx = (req.task_num - 1) if req.task_num is not None else session.current_index
     if idx < 0 or idx >= len(session.questions):
@@ -693,6 +813,7 @@ def action_retry(request: Request):
     session = deployer.load_active_session(loader)
     if not session or not session.current_question:
         raise HTTPException(status_code=400, detail="No active question to retry")
+    _enforce_owner(request, session.session_id)
 
     cur_idx = session.current_index
     actor = "admin" if is_admin_authenticated(request) else "candidate"
@@ -713,10 +834,11 @@ def action_retry(request: Request):
 
 
 @app.post("/api/action/submit")
-def action_submit():
+def action_submit(request: Request):
     session = deployer.load_active_session(loader)
     if not session or not session.questions:
         raise HTTPException(status_code=400, detail="No active exam session")
+    _enforce_owner(request, session.session_id)
 
     # 1. Evaluate active question if present
     if session.mode == "sequential" and session.current_question:
@@ -880,6 +1002,7 @@ def action_submit():
             )
             orchestrator.teardown_session(session.session_id)
             deployer.clear_active_session()
+            _clear_owner(session.session_id)
     except Exception:
         pass
 
@@ -983,6 +1106,7 @@ def ensure_k3d_cluster_running(cluster_name: str = "cka") -> bool:
         print(f"[ClusterAutoStart] Warning checking cluster: {e}", flush=True)
 @app.post("/api/start")
 def start_exam(req: StartRequest, request: Request):
+    cid = _client_id(request)
     cand_tok = req.candidate_token
     # If candidate token is provided, check if session already active for it
     if cand_tok:
@@ -1015,6 +1139,7 @@ def start_exam(req: StartRequest, request: Request):
         try:
             redis_bus.archive_session(old_session.session_id, status="replaced")
             orchestrator.teardown_session(old_session.session_id)
+            _clear_owner(old_session.session_id)
         except Exception:
             pass
 
@@ -1084,6 +1209,7 @@ def start_exam(req: StartRequest, request: Request):
             except Exception:
                 pass
 
+        _claim_owner(session.session_id, cid)
         redis_bus.touch_session_activity(session.session_id)
         orchestrator.provision_session(session.session_id)
 
@@ -1105,6 +1231,7 @@ def restore_session(req: RestoreSessionRequest, request: Request):
     session_id = req.session_id
     if not session_id:
         raise HTTPException(status_code=400, detail="session_id is required")
+    cid = _client_id(request)
 
     # Check resource limit before restoring
     res_info = get_system_resource_info()
@@ -1184,6 +1311,11 @@ def restore_session(req: RestoreSessionRequest, request: Request):
                 pass
         redis_bus.touch_session_activity(session_id)
 
+    # Enforce ownership before (re)claiming: a non-owner/non-admin must not be
+    # able to overwrite the owner lock by restoring someone else's session.
+    _enforce_owner(request, session_id)
+    _claim_owner(session_id, cid)
+
     # Re-run full provisioning: after a teardown the Incus fleet VMs are gone,
     # so start_desktop alone would leave the desktop without ssh/kubectl access.
     orchestrator.provision_session(session_id)
@@ -1203,6 +1335,7 @@ def reset_exam(request: Request):
     actor = "admin" if is_admin_authenticated(request) else "candidate"
     active_session = deployer.load_active_session(loader)
     if active_session and active_session.session_id:
+        _enforce_owner(request, active_session.session_id)
         try:
             recorder.attach_or_resume(active_session.session_id, active_session.name)
             recorder.log_event("EXAM_RESET", {"actor": actor}, actor=actor)
@@ -1210,6 +1343,7 @@ def reset_exam(request: Request):
             pass
         redis_bus.archive_session(active_session.session_id, status="reset")
         orchestrator.teardown_session(active_session.session_id)
+        _clear_owner(active_session.session_id)
     deployer.clear_session(cleanup_cluster=True)
     return {"status": "ok", "message": "Exam session cleared and cluster cleaned"}
 
@@ -1535,6 +1669,8 @@ def admin_terminate_session(identifier: str, request: Request):
         deployer.clear_session(cleanup_cluster=True)
 
     redis_bus.delete_invitation(identifier)
+    _clear_owner(actual_session_id)
+    _clear_owner(identifier)
     if redis_bus.is_available():
         try:
             client = redis_bus.get_sync_client()
@@ -1575,6 +1711,8 @@ def admin_reset_session(identifier: str, request: Request):
     orchestrator.teardown_session(actual_session_id)
     if actual_session_id != identifier:
         orchestrator.teardown_session(identifier)
+    _clear_owner(actual_session_id)
+    _clear_owner(identifier)
 
     active_s = deployer.load_active_session(loader)
     if active_s and (active_s.session_id == actual_session_id or active_s.session_id == identifier):
@@ -1597,11 +1735,12 @@ def admin_end_session(identifier: str, request: Request):
     active_s = deployer.load_active_session(loader)
     scorecard = None
     if active_s and active_s.session_id == identifier:
-        scorecard = action_submit()
+        scorecard = action_submit(request)
     else:
         redis_bus.archive_session(identifier, status="submitted")
         orchestrator.teardown_session(identifier)
         deployer.clear_active_session()
+        _clear_owner(identifier)
 
 
 
@@ -1708,6 +1847,10 @@ async def terminal_websocket(websocket: WebSocket, session_id: Optional[str] = N
         if not target_sid or (active_sid and target_sid != active_sid):
             print(f"[Terminal] Forbidden: candidate attempted to access session {param_sid} (active: {active_sid})", flush=True)
             await websocket.close(code=1008)
+            return
+        if _owner_mismatch(target_sid, _client_id_ws(websocket), False):
+            print(f"[Terminal] Forbidden: session {target_sid} owned by another client", flush=True)
+            await websocket.close(code=1008, reason="Session active in another window or device")
             return
         explicit_sid = target_sid
 
@@ -1915,6 +2058,10 @@ async def _proxy_vnc(websocket: WebSocket, session_id: Optional[str] = None):
             print(f"[VNC Proxy] Forbidden: Candidate attempted to access unauthorized session {session_id} (active: {active_sid})", flush=True)
             await websocket.close(code=1008)
             return
+        if _owner_mismatch(sid, _client_id_ws(websocket), False):
+            print(f"[VNC Proxy] Forbidden: session {sid} owned by another client", flush=True)
+            await websocket.close(code=1008, reason="Session active in another window or device")
+            return
 
     target_host = None
     target_port = 5901
@@ -2059,6 +2206,17 @@ async def vnc_ws_novnc_vnc(websocket: WebSocket):
 @app.websocket("/ws/session/{session_id}")
 async def session_events_websocket(websocket: WebSocket, session_id: str):
     await websocket.accept()
+
+    # Soft per-session owner lock: only the owning client may subscribe to the
+    # live event stream of the active session (admins always bypass).
+    is_admin = is_admin_authenticated(websocket)
+    active_sid = redis_bus.get_active_session_id()
+    owner_sid = active_sid if session_id in ("active", "default") else session_id
+    if owner_sid and active_sid and owner_sid == active_sid:
+        if _owner_mismatch(owner_sid, _client_id_ws(websocket), is_admin):
+            await websocket.close(code=1008, reason="Session active in another window or device")
+            return
+
     if not redis_bus.is_available():
         # Fallback loop if Redis is temporarily offline
         try:
