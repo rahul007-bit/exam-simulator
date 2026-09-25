@@ -2,7 +2,7 @@
 
 > GENERATED FILE - do not edit by hand.
 > Canonical data: `.agents/frontend-migration/tasks.json`.
-> Regenerate with `python scripts/agents_board.py`. Last generated: 2026-09-11T12:58:43Z.
+> Regenerate with `python scripts/agents_board.py`. Last generated: 2026-09-25T03:40:24Z.
 
 **Program:** `frontend-migration`  
 **Branch:** `feature/frontend-vue-migration`  
@@ -13,11 +13,11 @@
 | :--- | ---: |
 | todo | 6 |
 | claimed | 0 |
-| in-review | 1 |
-| verified | 40 |
+| in-review | 0 |
+| verified | 42 |
 | blocked | 0 |
 | rejected | 0 |
-| **total** | **47** |
+| **total** | **48** |
 
 ## Milestones
 
@@ -106,7 +106,8 @@
 | `FS-006` | Dynamic preset generator API | FE-004 | opencode | verified | - | .agents/FS-006-opencode/EVIDENCE.md |
 | `FS-007` | Custom exam builder UI | FS-006 | opencode | verified | - | .agents/FS-007-opencode/EVIDENCE.md |
 | `FS-008` | Hide preset catalog from non-admin users | FS-002 | opencode | verified | - | .agents/FS-008-opencode/EVIDENCE.md |
-| `FS-003b` | Concurrent per-user sessions (multi-session) | FS-003, FS-004 | - | in-review | - | .agents/FS-003b-opencode/EVIDENCE.md |
+| `FS-003b` | Concurrent per-user sessions (multi-session) | FS-003, FS-004 | - | verified | - | .agents/FS-003b-opencode/EVIDENCE.md |
+| `FS-009` | Per-terminal channel recording, conditional provisioning and admin notifications | FS-003b | opencode | verified | - | .agents/FS-009-opencode/EVIDENCE.md |
 
 ## Acceptance criteria
 
@@ -769,3 +770,15 @@
   - terminal/VNC resolve per session, not session:active:id
 - **Verification:**
   - `concurrency integration test`
+
+### FS-009 - Per-terminal channel recording, conditional provisioning and admin notifications
+
+- **Deliverable:** per-channel terminal recording (user-web/admin-web/user-desktop) with channel-filtered replay, context-conditional sandbox provisioning, and admin -> candidate desktop notifications
+- **Depends on:** FS-003b
+- **Acceptance:**
+  - desktop terminal input+output recorded and replayable
+  - replay filters events per channel (User Web/Desktop, Admin)
+  - admin notification appears as a native desktop popup
+  - only the sandboxes a session needs are provisioned
+- **Verification:**
+  - `unit tests + host smoke`

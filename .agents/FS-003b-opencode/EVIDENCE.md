@@ -30,8 +30,7 @@ Design: decisions.md D-012.
 - Full backend suite: 86 tests; only the 3 known host-only failures
   (termios, k3d binary, Firefox history) — no regressions.
 - Deployed to the host; `k8s-web.service` active, startup clean; GET probes 200.
-- **Not yet exercised live: two simultaneous provisioned sessions.** Acceptance
-  "two users run exams concurrently" still needs a real 2-session host test
-  (belongs to FE-044/manual verification).
+- **Exercised live: two simultaneous provisioned sessions** — manually tested
+  by Rahul on the host (2026-09-25), both sessions ran concurrently.
 
-## Status: in-review (unit-verified + deployed; live concurrency pending)
+## Status: VERIFIED — live two-session concurrency manually tested by Rahul on the host (2026-09-25): two users ran exams concurrently, terminal/VNC resolved per session. Board flipped to verified 2026-09-25.

@@ -1827,7 +1827,7 @@
         "FS-004"
       ],
       "owner": null,
-      "status": "in-review",
+      "status": "verified",
       "verifier": null,
       "deliverable": "true per-user concurrent active sessions (each user owns an independent session); remove the single-active-session assumption from terminal/VNC/reaper resolution",
       "acceptance": [
