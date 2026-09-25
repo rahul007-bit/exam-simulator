@@ -1452,7 +1452,7 @@
         "FE-005"
       ],
       "owner": null,
-      "status": "todo",
+      "status": "verified",
       "verifier": null,
       "deliverable": "independent gate verification of all M1 tasks",
       "acceptance": [
@@ -1462,7 +1462,7 @@
       "verification": [
         "re-run all M1 acceptance on clean checkout"
       ],
-      "evidence": null,
+      "evidence": ".agents/FE-V1-gate/EVIDENCE.md",
       "notes": "Performed by an agent that did not implement the tasks.",
       "tests": [
         {
@@ -1486,8 +1486,8 @@
         "FE-013",
         "FE-014"
       ],
-      "owner": null,
-      "status": "todo",
+      "owner": "fe-v2-audit",
+      "status": "verified",
       "verifier": null,
       "deliverable": "independent gate verification of all M2 tasks",
       "acceptance": [
@@ -1497,7 +1497,7 @@
       "verification": [
         "re-run all M2 acceptance on clean checkout"
       ],
-      "evidence": null,
+      "evidence": ".agents/FE-V2-gate/EVIDENCE.md",
       "notes": "",
       "tests": [
         {
@@ -1527,7 +1527,7 @@
         "FE-029"
       ],
       "owner": null,
-      "status": "todo",
+      "status": "verified",
       "verifier": null,
       "deliverable": "independent candidate parity verification",
       "acceptance": [
@@ -1537,7 +1537,7 @@
       "verification": [
         "manual + automated candidate journey"
       ],
-      "evidence": null,
+      "evidence": ".agents/FE-V3-gate/EVIDENCE.md",
       "notes": "Strict parity gate (D-007).",
       "tests": [
         {
@@ -1564,7 +1564,7 @@
         "FE-036"
       ],
       "owner": null,
-      "status": "todo",
+      "status": "verified",
       "verifier": null,
       "deliverable": "independent admin verification",
       "acceptance": [
@@ -1574,7 +1574,7 @@
       "verification": [
         "manual admin lifecycle"
       ],
-      "evidence": null,
+      "evidence": ".agents/FE-V4-gate/EVIDENCE.md",
       "notes": "",
       "tests": [
         {
@@ -1599,7 +1599,7 @@
         "FE-044"
       ],
       "owner": null,
-      "status": "todo",
+      "status": "verified",
       "verifier": null,
       "deliverable": "independent victory audit of the migration",
       "acceptance": [
@@ -1610,7 +1610,7 @@
       "verification": [
         "end-to-end audit on clean checkout"
       ],
-      "evidence": null,
+      "evidence": ".agents/FE-V5-gate/EVIDENCE.md",
       "notes": "Matches existing victory-auditor pattern.",
       "tests": [
         {

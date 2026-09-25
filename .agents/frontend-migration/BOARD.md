@@ -2,7 +2,7 @@
 
 > GENERATED FILE - do not edit by hand.
 > Canonical data: `.agents/frontend-migration/tasks.json`.
-> Regenerate with `python scripts/agents_board.py`. Last generated: 2026-09-25T04:09:34Z.
+> Regenerate with `python scripts/agents_board.py`. Last generated: 2026-09-25T04:26:56Z.
 
 **Program:** `frontend-migration`  
 **Branch:** `feature/frontend-vue-migration`  
@@ -11,10 +11,10 @@
 
 | Status | Count |
 | :--- | ---: |
-| todo | 5 |
+| todo | 0 |
 | claimed | 0 |
 | in-review | 0 |
-| verified | 43 |
+| verified | 48 |
 | blocked | 0 |
 | rejected | 0 |
 | **total** | **48** |
@@ -41,7 +41,7 @@
 | `FE-003` | FastAPI SPA fallback and build integration | FE-001 | implementer-1 | verified | independent-agent | .agents/FE-003-implementer-1/EVIDENCE.md |
 | `FE-004` | Typed API client and Pinia base stores | FE-003 | implementer-3 | verified | independent-agent | .agents/FE-004-implementer-3/EVIDENCE.md |
 | `FE-005` | Adopt Tailwind CSS + Headless UI and refactor foundation + Toaster | FE-002, FE-010 | implementer-5 | verified | independent-agent | .agents/FE-005-implementer-5/EVIDENCE.md |
-| `FE-V1` | M1 gate - independent verification | FE-000, FE-001, FE-002, FE-003, FE-004, FE-005 | - | todo | - | - |
+| `FE-V1` | M1 gate - independent verification | FE-000, FE-001, FE-002, FE-003, FE-004, FE-005 | - | verified | - | .agents/FE-V1-gate/EVIDENCE.md |
 
 ### 1 - UI system
 
@@ -52,7 +52,7 @@
 | `FE-012` | UI primitives | FE-002, FE-005 | implementer-7 | verified | independent-agent | .agents/FE-012-implementer-7/EVIDENCE.md |
 | `FE-013` | TanStack Table wrapper (admin use) | FE-012 | implementer-8 | verified | independent-agent | .agents/FE-013-implementer-8/EVIDENCE.md |
 | `FE-014` | De-glow/de-emoji audit and icon set | FE-002, FE-005 | implementer-11 | verified | independent-agent | .agents/FE-014-implementer-11/EVIDENCE.md |
-| `FE-V2` | M2 gate - independent verification | FE-010, FE-011, FE-012, FE-013, FE-014 | - | todo | - | - |
+| `FE-V2` | M2 gate - independent verification | FE-010, FE-011, FE-012, FE-013, FE-014 | fe-v2-audit | verified | - | .agents/FE-V2-gate/EVIDENCE.md |
 
 ### 2 - Candidate
 
@@ -68,7 +68,7 @@
 | `FE-027` | Clipboard sync composable | FE-026 | implementer-20 | verified | independent-agent | .agents/FE-027-implementer-20/EVIDENCE.md |
 | `FE-028` | Fullscreen anti-cheat composable | FE-020 | implementer-21 | verified | independent-agent | .agents/FE-028-implementer-21/EVIDENCE.md |
 | `FE-029` | Recordings list and replay island | FE-025 | implementer-23 | verified | independent-agent | .agents/FE-029-implementer-23/EVIDENCE.md |
-| `FE-V3` | M3 gate - candidate parity verification | FE-020, FE-021, FE-022, FE-023, FE-024, FE-025, FE-026, FE-027, FE-028, FE-029 | - | todo | - | - |
+| `FE-V3` | M3 gate - candidate parity verification | FE-020, FE-021, FE-022, FE-023, FE-024, FE-025, FE-026, FE-027, FE-028, FE-029 | - | verified | - | .agents/FE-V3-gate/EVIDENCE.md |
 
 ### 3 - Admin
 
@@ -81,7 +81,7 @@
 | `FE-034` | Admin infrastructure table | FE-013 | implementer-24 | verified | independent-agent | .agents/FE-034-implementer-24/EVIDENCE.md |
 | `FE-035` | Admin live observe view | FE-025, FE-026 | implementer-25 | verified | independent-agent | .agents/FE-035-implementer-25/EVIDENCE.md |
 | `FE-036` | Admin session actions: tighter dialog spacing + non-blocking per-row loading | FE-031 | implementer-19 | verified | independent-agent | .agents/FE-036-implementer-19/EVIDENCE.md |
-| `FE-V4` | M4 gate - admin verification | FE-030, FE-031, FE-032, FE-033, FE-034, FE-035, FE-036 | - | todo | - | - |
+| `FE-V4` | M4 gate - admin verification | FE-030, FE-031, FE-032, FE-033, FE-034, FE-035, FE-036 | - | verified | - | .agents/FE-V4-gate/EVIDENCE.md |
 
 ### 4 - Cutover
 
@@ -92,7 +92,7 @@
 | `FE-042` | Playwright E2E and axe accessibility | FE-040 | implementer-fe042 | verified | independent-agent | .agents/fe041-043-verifier/EVIDENCE.md |
 | `FE-043` | Update docs (README, HANDOVER, PLATFORM_SETUP) | FE-040 | implementer-fe043 | verified | independent-agent | .agents/fe041-043-verifier/EVIDENCE.md |
 | `FE-044` | Full regression against real backend | FE-042 | - | verified | independent-agent | .agents/FE-044-regression/EVIDENCE.md |
-| `FE-V5` | M5 gate - victory audit | FE-040, FE-041, FE-042, FE-043, FE-044 | - | todo | - | - |
+| `FE-V5` | M5 gate - victory audit | FE-040, FE-041, FE-042, FE-043, FE-044 | - | verified | - | .agents/FE-V5-gate/EVIDENCE.md |
 
 ### Future (FS)
 
