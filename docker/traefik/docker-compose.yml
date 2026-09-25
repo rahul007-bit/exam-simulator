@@ -1,0 +1,12 @@
+services:
+  traefik:
+    image: traefik:v3.1
+    container_name: traefik
+    restart: unless-stopped
+    # host networking: binds :80 and :443 directly (iptables INPUT is ACCEPT).
+    network_mode: host
+    volumes:
+      - ./traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./dynamic.yml:/etc/traefik/dynamic.yml:ro
+      - ./certs:/etc/traefik/certs:ro
+      - ./users.txt:/etc/traefik/users.txt:ro

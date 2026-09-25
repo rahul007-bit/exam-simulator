@@ -4,18 +4,12 @@ CTX="${KUBECTL_CONTEXT:-k3d-cka}"
 NS="payments"
 kubectl --context "$CTX" create namespace "$NS" --dry-run=client -o yaml | kubectl --context "$CTX" apply -f -
 
-# Create secret api-keys with valid baseline
+# Create secret api-keys with mismatched key name (DB_PASSWORD instead of DB_PASS)
 kubectl --context "$CTX" create secret generic api-keys \
   -n "$NS" \
   --from-literal=API_KEY="supersecretkeyvalue" \
-  --from-literal=DB_PASS="mydbpassword123" \
+  --from-literal=DB_PASSWORD="mydbpassword123" \
   --dry-run=client -o yaml | kubectl --context "$CTX" apply -f -
-
-# Patch with raw base64-like strings that look plausible but have invalid trailing whitespace/characters
-kubectl --context "$CTX" patch secret api-keys -n "$NS" --type='json' -p='[
-  {"op": "replace", "path": "/data/API_KEY", "value": "c3VwZXJzZWNyZXRrZXl2YWx1ZQ=="},
-  {"op": "replace", "path": "/data/DB_PASS",  "value": "bXlkYnBhc3N3b3JkMTIz "}
-]' 2>/dev/null || true
 
 # Deploy Pod crypto-service referencing api-keys
 kubectl --context "$CTX" apply -f - <<EOF

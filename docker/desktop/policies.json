@@ -1,0 +1,65 @@
+{
+  "policies": {
+    "DisableAppUpdate": true,
+    "DisableTelemetry": true,
+    "DisableFirefoxStudies": true,
+    "DisablePocket": true,
+    "DisableFirefoxAccounts": true,
+    "DisableDefaultBrowserAgent": true,
+    "DontCheckDefaultBrowser": true,
+    "OverrideFirstRunPage": "https://kubernetes.io/docs/home/",
+    "OverridePostUpdatePage": "",
+    "DisplayBookmarksToolbar": "always",
+    "Homepage": {
+      "URL": "https://kubernetes.io/docs/home/",
+      "Locked": true,
+      "StartPage": "homepage"
+    },
+    "NewTabPage": false,
+    "UserMessaging": {
+      "WhatsNew": false,
+      "ExtensionRecommendations": false,
+      "FeatureRecommendations": false,
+      "UrlbarInterventions": false,
+      "SkipOnboarding": true,
+      "MoreFromMozilla": false
+    },
+    "FirefoxHome": {
+      "Search": false,
+      "TopSites": false,
+      "SponsoredTopSites": false,
+      "Highlights": false,
+      "Pocket": false,
+      "SponsoredPocket": false,
+      "Snippets": false,
+      "Locked": true
+    },
+    "Bookmarks": [
+      {
+        "Title": "Kubernetes Documentation",
+        "URL": "https://kubernetes.io/docs/home/",
+        "Placement": "toolbar"
+      },
+      {
+        "Title": "Kubectl Cheat Sheet",
+        "URL": "https://kubernetes.io/docs/reference/kubectl/cheatsheet/",
+        "Placement": "toolbar"
+      },
+      {
+        "Title": "Kubernetes Tasks",
+        "URL": "https://kubernetes.io/docs/tasks/",
+        "Placement": "toolbar"
+      },
+      {
+        "Title": "Helm Documentation",
+        "URL": "https://helm.sh/docs/",
+        "Placement": "toolbar"
+      },
+      {
+        "Title": "Kubernetes Blog",
+        "URL": "https://kubernetes.io/blog/",
+        "Placement": "toolbar"
+      }
+    ]
+  }
+}

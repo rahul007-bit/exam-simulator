@@ -1,0 +1,204 @@
+/*
+ * Design tokens — slate neutrals + a single indigo accent (decisions.md D-003).
+ * Canonical palette source: PLAN.md §2.
+ *
+ * Rule: every colour used by the app MUST come from a variable declared here.
+ * Components/views MUST NOT hard-code colours (FE-002 acceptance #1).
+ *
+ * Theme resolution (FE-002 acceptance #3):
+ *   - The default follows `prefers-color-scheme` (fallback block at the bottom).
+ *   - A manual choice is persisted and applied as `data-theme="dark" | "light"`
+ *     on <html> by `src/composables/useTheme.ts` (and the inline bootstrap in
+ *     index.html, which prevents a flash of the wrong theme).
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* ------------------------------------------------------------------ *
+   * Palette — dark (default)
+   * ------------------------------------------------------------------ */
+  --color-bg-app: #0b0f16;
+  --color-surface: #121826;
+  --color-elevated: #1a2233;
+  --color-hover: #222c40;
+  --color-border: #263042;
+  --color-border-strong: #33405a;
+  --color-text: #e6e9ef;
+  --color-text-muted: #9aa4b2;
+  --color-text-dim: #5b6675;
+
+  /* ------------------------------------------------------------------ *
+   * Accent — single indigo family
+   * --color-accent*   decorative/ring/fill accents
+   * --color-accent-text  AA-safe accent for text on app/surface backgrounds
+   * --color-accent-solid AA-safe fill for controls carrying white text
+   * ------------------------------------------------------------------ */
+  --color-accent: #6366f1;
+  --color-accent-hover: #818cf8;
+  --color-accent-active: #4f46e5;
+  --color-accent-solid: #4f46e5;
+  --color-accent-solid-hover: #4338ca;
+  --color-accent-text: #a5b4fc;
+  --color-accent-contrast: #ffffff;
+  --color-accent-subtle: rgb(99 102 241 / 0.16);
+
+  /* ------------------------------------------------------------------ *
+   * Semantic — base swatches + AA-safe text variants
+   * ------------------------------------------------------------------ */
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+  --color-info: #60a5fa;
+  --color-success-text: #4ade80;
+  --color-warning-text: #fbbf24;
+  --color-danger-text: #f87171;
+  --color-info-text: #93c5fd;
+
+  /* ------------------------------------------------------------------ *
+   * Focus ring
+   * ------------------------------------------------------------------ */
+  --focus-ring-color: #818cf8;
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+
+  /* ------------------------------------------------------------------ *
+   * Radii — 6 / 8 / 12
+   * ------------------------------------------------------------------ */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 9999px;
+
+  /* ------------------------------------------------------------------ *
+   * Spacing — 4px grid (Tailwind default scale)
+   * ------------------------------------------------------------------ */
+  --space-0: 0;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* ------------------------------------------------------------------ *
+   * Typography (Inter for UI, JetBrains Mono for code — self-hosted)
+   * ------------------------------------------------------------------ */
+  --font-sans:
+    'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial,
+    sans-serif;
+  --font-mono:
+    'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono',
+    monospace;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 16px;
+  --text-lg: 20px;
+  --text-xl: 24px;
+  --text-2xl: 30px;
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.625;
+
+  /* ------------------------------------------------------------------ *
+   * Elevation — one subtle scale, no glows
+   * ------------------------------------------------------------------ */
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 0.24);
+  --shadow-sm: 0 1px 3px rgb(0 0 0 / 0.28), 0 1px 2px rgb(0 0 0 / 0.24);
+  --shadow-md: 0 4px 12px rgb(0 0 0 / 0.28);
+  --shadow-lg: 0 12px 32px rgb(0 0 0 / 0.32);
+
+  /* ------------------------------------------------------------------ *
+   * Motion + layout constants (shared across themes)
+   * ------------------------------------------------------------------ */
+  --transition-fast: 120ms ease;
+  --transition-base: 180ms ease;
+  --header-height: 52px;
+  --tabbar-height: 36px;
+}
+
+/* -------------------------------------------------------------------- *
+ * Palette — light (explicit manual selection)
+ * -------------------------------------------------------------------- */
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --color-bg-app: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-elevated: #ffffff;
+  --color-hover: #eef1f5;
+  --color-border: #e2e6ec;
+  --color-border-strong: #cbd2db;
+  --color-text: #0f172a;
+  --color-text-muted: #5b6675;
+  --color-text-dim: #8a94a3;
+
+  --color-accent: #4f46e5;
+  --color-accent-hover: #6366f1;
+  --color-accent-active: #4338ca;
+  --color-accent-solid: #4f46e5;
+  --color-accent-solid-hover: #4338ca;
+  --color-accent-text: #4f46e5;
+  --color-accent-contrast: #ffffff;
+  --color-accent-subtle: rgb(79 70 229 / 0.1);
+
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+  --color-info: #60a5fa;
+  --color-success-text: #15803d;
+  --color-warning-text: #b45309;
+  --color-danger-text: #b91c1c;
+  --color-info-text: #2563eb;
+
+  --focus-ring-color: #4f46e5;
+}
+
+/* -------------------------------------------------------------------- *
+ * Palette — light when no explicit choice has been made yet
+ * (falls back to the OS preference before/without JS).
+ * -------------------------------------------------------------------- */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    color-scheme: light;
+
+    --color-bg-app: #f6f7f9;
+    --color-surface: #ffffff;
+    --color-elevated: #ffffff;
+    --color-hover: #eef1f5;
+    --color-border: #e2e6ec;
+    --color-border-strong: #cbd2db;
+    --color-text: #0f172a;
+    --color-text-muted: #5b6675;
+    --color-text-dim: #8a94a3;
+
+    --color-accent: #4f46e5;
+    --color-accent-hover: #6366f1;
+    --color-accent-active: #4338ca;
+    --color-accent-solid: #4f46e5;
+    --color-accent-solid-hover: #4338ca;
+    --color-accent-text: #4f46e5;
+    --color-accent-contrast: #ffffff;
+    --color-accent-subtle: rgb(79 70 229 / 0.1);
+
+    --color-success: #22c55e;
+    --color-warning: #f59e0b;
+    --color-danger: #ef4444;
+    --color-info: #60a5fa;
+    --color-success-text: #15803d;
+    --color-warning-text: #b45309;
+    --color-danger-text: #b91c1c;
+    --color-info-text: #2563eb;
+
+    --focus-ring-color: #4f46e5;
+  }
+}

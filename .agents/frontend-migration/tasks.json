@@ -1,0 +1,1871 @@
+{
+  "program": "frontend-migration",
+  "branch": "feature/frontend-vue-migration",
+  "created": "2026-09-10",
+  "status_enum": [
+    "todo",
+    "claimed",
+    "in-review",
+    "verified",
+    "blocked",
+    "rejected"
+  ],
+  "environment": {
+    "canonical": "platform host with Node >= 20.19 and npm (D-006)",
+    "equivalent_runtimes": [
+      "bun 1.4.x runs the same package.json scripts"
+    ],
+    "command_notes": [
+      "npm run <script> == bun run <script>",
+      "npm ci == bun install (bun.lock is git-ignored; host generates package-lock.json)",
+      "rg may be absent; substitute grep -R / Select-String / the repo Vitest audit test",
+      "Playwright browser tests are host-only (need npx playwright install + network); locally use Vitest+jsdom and mark the browser leg DEFERRED"
+    ]
+  },
+  "milestones": {
+    "M1": {
+      "name": "Foundation",
+      "tasks": [
+        "FE-000",
+        "FE-001",
+        "FE-002",
+        "FE-003",
+        "FE-004",
+        "FE-005"
+      ],
+      "gate": "FE-V1"
+    },
+    "M2": {
+      "name": "UI system",
+      "tasks": [
+        "FE-010",
+        "FE-011",
+        "FE-012",
+        "FE-013",
+        "FE-014"
+      ],
+      "gate": "FE-V2"
+    },
+    "M3": {
+      "name": "Candidate",
+      "tasks": [
+        "FE-020",
+        "FE-021",
+        "FE-022",
+        "FE-023",
+        "FE-024",
+        "FE-025",
+        "FE-026",
+        "FE-027",
+        "FE-028",
+        "FE-029"
+      ],
+      "gate": "FE-V3"
+    },
+    "M4": {
+      "name": "Admin",
+      "tasks": [
+        "FE-030",
+        "FE-031",
+        "FE-032",
+        "FE-033",
+        "FE-034",
+        "FE-035",
+        "FE-036"
+      ],
+      "gate": "FE-V4"
+    },
+    "M5": {
+      "name": "Cutover",
+      "tasks": [
+        "FE-040",
+        "FE-041",
+        "FE-042",
+        "FE-043",
+        "FE-044"
+      ],
+      "gate": "FE-V5"
+    }
+  },
+  "tasks": [
+    {
+      "id": "FE-000",
+      "kind": "impl",
+      "phase": "0 - Foundation",
+      "milestone": "M1",
+      "title": "Program workspace, board, protocol and validator",
+      "depends": [],
+      "owner": "orchestrator",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": ".agents/frontend-migration/ workspace (PLAN, decisions, PROTOCOL, tasks.json, templates) + scripts/agents_board.py",
+      "acceptance": [
+        "program workspace exists with PLAN.md, decisions.md, PROTOCOL.md, ORIGINAL_REQUEST.md",
+        "tasks.json seeded with M1-M5 tasks and FS backlog",
+        "scripts/agents_board.py generates BOARD.md and validates the board",
+        "python scripts/agents_board.py --check exits 0"
+      ],
+      "verification": [
+        "python scripts/agents_board.py --check",
+        "confirm BOARD.md matches tasks.json and statuses"
+      ],
+      "evidence": ".agents/frontend-migration/",
+      "notes": "Foundation task; seeded by migration bootstrap.",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "audit",
+          "run": "python scripts/agents_board.py --check",
+          "expect": "exit 0, 'validation OK'"
+        },
+        {
+          "id": "T2",
+          "type": "audit",
+          "run": "list .agents/frontend-migration/",
+          "expect": "PLAN.md, decisions.md, PROTOCOL.md, tasks.json, BOARD.md, templates/ present"
+        }
+      ]
+    },
+    {
+      "id": "FE-001",
+      "kind": "impl",
+      "phase": "0 - Foundation",
+      "milestone": "M1",
+      "title": "Vite + Vue 3 + TS scaffold and tooling",
+      "depends": [
+        "FE-000"
+      ],
+      "owner": "opencode",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "web/frontend/ scaffold: Vite, Vue 3, TS, ESLint, Prettier, Vitest, Playwright, dev proxy for /api,/ws,/novnc",
+      "acceptance": [
+        "npm run build succeeds and emits web/dist/",
+        "npm run dev starts and /api proxy reaches FastAPI on :3000",
+        "ESLint + Prettier + tsc --noEmit pass",
+        "Vitest smoke test passes"
+      ],
+      "verification": [
+        "npm ci && npm run build  (or bun install && bun run build)",
+        "npm run lint && npx tsc --noEmit  (or bun run lint && bunx tsc --noEmit)",
+        "npm run test  (or bun run test)"
+      ],
+      "evidence": ".agents/FE-001-opencode/EVIDENCE.md",
+      "notes": "Do not migrate UI yet; blank app only.",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "integration",
+          "run": "npm ci && npm run build  (or: bun install && bun run build)",
+          "expect": "exit 0 and web/dist/index.html exists"
+        },
+        {
+          "id": "T2",
+          "type": "audit",
+          "run": "npm run lint && npx tsc --noEmit  (or: bun run lint && bunx tsc --noEmit)",
+          "expect": "exit 0"
+        },
+        {
+          "id": "T3",
+          "type": "unit",
+          "run": "npm run test  (or: bun run test)",
+          "expect": "smoke test passes"
+        }
+      ]
+    },
+    {
+      "id": "FE-002",
+      "kind": "impl",
+      "phase": "0 - Foundation",
+      "milestone": "M1",
+      "title": "Design tokens and base styles (dark + light)",
+      "depends": [
+        "FE-001"
+      ],
+      "owner": "opencode",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "src/assets/styles/tokens.css + base.css (slate+indigo palette, radii, spacing, type, elevation, data-theme), plus the useTheme composable + ThemeToggle component and theme tests",
+      "acceptance": [
+        "all palette values exposed as CSS variables in tokens.css; no raw hex in components/views",
+        "dark and light themes both render with AA-contrast text (>= 4.5:1 for body/UI text)",
+        "prefers-color-scheme default, plus a persisted manual toggle via useTheme + ThemeToggle"
+      ],
+      "verification": [
+        "grep raw hex outside tokens (should be none)",
+        "contrast check via axe on a token sample page"
+      ],
+      "evidence": ".agents/FE-002-opencode/EVIDENCE.md",
+      "notes": "",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "audit",
+          "run": "scan src/components and src/views for /#[0-9a-fA-F]{3,6}/ (grep -R / Select-String; rg optional)",
+          "expect": "no matches (tokens only)"
+        },
+        {
+          "id": "T2",
+          "type": "e2e",
+          "run": "toggle theme and reload",
+          "expect": "data-theme flips and persists; both themes AA contrast"
+        }
+      ]
+    },
+    {
+      "id": "FE-003",
+      "kind": "impl",
+      "phase": "0 - Foundation",
+      "milestone": "M1",
+      "title": "FastAPI SPA fallback and build integration",
+      "depends": [
+        "FE-001"
+      ],
+      "owner": "implementer-1",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "server.py serves web/dist with SPA fallback; /admin routed to SPA; build wired into tools/start-web.sh + systemd unit",
+      "acceptance": [
+        "GET / and GET /admin return SPA index",
+        "all existing /api and /ws routes unchanged",
+        "/novnc mount preserved",
+        "build on deploy produces web/dist without committing it"
+      ],
+      "verification": [
+        "curl -s localhost:3000/ | head",
+        "python scripts/verify_platform_api.py"
+      ],
+      "evidence": ".agents/FE-003-implementer-1/EVIDENCE.md",
+      "notes": "Keep legacy static as fallback until FE-040 cutover.",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "integration",
+          "run": "curl -s localhost:3000/",
+          "expect": "SPA index returned"
+        },
+        {
+          "id": "T2",
+          "type": "integration",
+          "run": "curl -s -o NUL -w '%{http_code}' localhost:3000/api/session",
+          "expect": "200"
+        },
+        {
+          "id": "T3",
+          "type": "integration",
+          "run": "python scripts/verify_platform_api.py",
+          "expect": "pass"
+        }
+      ]
+    },
+    {
+      "id": "FE-004",
+      "kind": "impl",
+      "phase": "0 - Foundation",
+      "milestone": "M1",
+      "title": "Typed API client and Pinia base stores",
+      "depends": [
+        "FE-003"
+      ],
+      "owner": "implementer-3",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "src/api client generated from /openapi.json + stores/session,timer,presets with typed responses",
+      "acceptance": [
+        "types generated from /openapi.json",
+        "client covers session, timer, presets, actions endpoints",
+        "stores expose typed state and actions; smoke test hits /api/session"
+      ],
+      "verification": [
+        "npm run gen:api && npx tsc --noEmit",
+        "npm run test"
+      ],
+      "evidence": ".agents/FE-004-implementer-3/EVIDENCE.md",
+      "notes": "Design client to send credentials for future auth (FS-002).",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "unit",
+          "run": "npm run gen:api && npx tsc --noEmit",
+          "expect": "types generate; exit 0"
+        },
+        {
+          "id": "T2",
+          "type": "integration",
+          "run": "session store fetchSession()",
+          "expect": "typed /api/session data populated"
+        }
+      ]
+    },
+    {
+      "id": "FE-005",
+      "kind": "impl",
+      "phase": "0 - Foundation",
+      "milestone": "M1",
+      "title": "Adopt Tailwind CSS + Headless UI and refactor foundation + Toaster",
+      "depends": [
+        "FE-002",
+        "FE-010"
+      ],
+      "owner": "implementer-5",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "Adopt Tailwind CSS (v4 via @tailwindcss/vite) and @headlessui/vue; expose the existing design tokens to Tailwind via @theme; refactor base styles and the Toaster to the new stack while preserving FE-002 and FE-010 acceptance.",
+      "acceptance": [
+        "tailwindcss + @tailwindcss/vite + @headlessui/vue installed and wired into the Vite build",
+        "design tokens exposed to Tailwind (@theme) so utilities resolve to the token palette; no raw hex in components/views",
+        "@headlessui/vue used for at least one accessible primitive (e.g. Toast transitions and/or a Dialog)",
+        "FE-002 acceptance (dark/light AA, no raw hex) and FE-010 acceptance (4 variants, aria-live, axe 0) still pass"
+      ],
+      "verification": [
+        "bun run build && bun run lint && bunx tsc --noEmit && bun run test",
+        "bunx playwright test tests/e2e/toast.spec.ts",
+        "re-run FE-002 token/hex/theme tests and FE-010 toast tests"
+      ],
+      "tests": [
+        {
+          "id": "T1",
+          "type": "unit",
+          "run": "bun run build && bun run lint && bunx tsc --noEmit && bun run test",
+          "expect": "all pass; Tailwind plugin active in the build"
+        },
+        {
+          "id": "T2",
+          "type": "audit",
+          "run": "confirm tailwindcss + @tailwindcss/vite + @headlessui/vue installed; no CDN/external URLs in src or index.html",
+          "expect": "deps present; no external asset URLs"
+        },
+        {
+          "id": "T3",
+          "type": "integration",
+          "run": "Playwright toast spec + hex audit over src/components and src/views",
+          "expect": "axe 0 violations; 0 raw hex; both themes AA"
+        }
+      ],
+      "evidence": ".agents/FE-005-implementer-5/EVIDENCE.md",
+      "notes": "Supersedes the styling approach of FE-002/FE-010 (its verification re-covers their acceptance)."
+    },
+    {
+      "id": "FE-010",
+      "kind": "impl",
+      "phase": "1 - UI system",
+      "milestone": "M2",
+      "title": "Toast service and Toaster component",
+      "depends": [
+        "FE-002"
+      ],
+      "owner": "implementer-4",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "useToast() + <Toaster/> (info/success/warning/error, stacking, auto-dismiss, aria-live)",
+      "acceptance": [
+        "four variants with semantic colors",
+        "stacking + auto-dismiss + manual dismiss",
+        "aria-live announced; keyboard dismissible"
+      ],
+      "verification": [
+        "npm run test (unit)",
+        "manual: trigger each variant"
+      ],
+      "evidence": ".agents/FE-010-implementer-4/EVIDENCE.md",
+      "notes": "",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "unit",
+          "run": "toast.push each variant",
+          "expect": "4 variants render, stack, auto-dismiss"
+        },
+        {
+          "id": "T2",
+          "type": "audit",
+          "run": "axe on toaster",
+          "expect": "aria-live present, no critical"
+        }
+      ]
+    },
+    {
+      "id": "FE-011",
+      "kind": "impl",
+      "phase": "1 - UI system",
+      "milestone": "M2",
+      "title": "Confirm dialog and PromptModal",
+      "depends": [
+        "FE-010",
+        "FE-005"
+      ],
+      "owner": "implementer-6",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "promise-based useConfirm() and prompt modal replacing confirm()/prompt()",
+      "acceptance": [
+        "useConfirm resolves true/false",
+        "prompt modal returns value or null",
+        "focus trap + Escape + aria-modal"
+      ],
+      "verification": [
+        "npm run test",
+        "manual keyboard-only flow"
+      ],
+      "evidence": ".agents/FE-011-implementer-6/EVIDENCE.md",
+      "notes": "Replaces all window.confirm/prompt sites.",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "unit",
+          "run": "useConfirm() resolve/cancel",
+          "expect": "true on confirm, false on cancel"
+        },
+        {
+          "id": "T2",
+          "type": "manual",
+          "run": "keyboard only: Escape / Tab",
+          "expect": "focus trapped, Escape cancels"
+        }
+      ]
+    },
+    {
+      "id": "FE-012",
+      "kind": "impl",
+      "phase": "1 - UI system",
+      "milestone": "M2",
+      "title": "UI primitives",
+      "depends": [
+        "FE-002",
+        "FE-005"
+      ],
+      "owner": "implementer-7",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "Button, Input, Select, Badge/Chip, Card, Modal, Spinner, Segmented control",
+      "acceptance": [
+        "all variants styled from tokens only",
+        "focus-visible rings; disabled/loading states",
+        "no glow/gradient; no emoji"
+      ],
+      "verification": [
+        "storybook-or-demo page review",
+        "axe pass"
+      ],
+      "evidence": ".agents/FE-012-implementer-7/EVIDENCE.md",
+      "notes": "",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "audit",
+          "run": "axe on primitives demo",
+          "expect": "no critical violations"
+        },
+        {
+          "id": "T2",
+          "type": "manual",
+          "run": "tab through every primitive",
+          "expect": "visible focus ring; disabled/loading correct"
+        }
+      ]
+    },
+    {
+      "id": "FE-013",
+      "kind": "impl",
+      "phase": "1 - UI system",
+      "milestone": "M2",
+      "title": "TanStack Table wrapper (admin use)",
+      "depends": [
+        "FE-012"
+      ],
+      "owner": "implementer-8",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "reusable DataTable component (sorting, filtering, pagination) built on TanStack Table",
+      "acceptance": [
+        "sort/filter/paginate working",
+        "keyboard-accessible headers and rows",
+        "empty/loading states"
+      ],
+      "verification": [
+        "npm run test",
+        "manual on sample data"
+      ],
+      "evidence": ".agents/FE-013-implementer-8/EVIDENCE.md",
+      "notes": "Admin only, not candidate.",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "unit",
+          "run": "sort/filter/paginate helpers",
+          "expect": "correct ordering, filtering, page slicing"
+        },
+        {
+          "id": "T2",
+          "type": "e2e",
+          "run": "click header sort; filter to empty",
+          "expect": "rows reorder; empty state shown"
+        }
+      ]
+    },
+    {
+      "id": "FE-014",
+      "kind": "impl",
+      "phase": "1 - UI system",
+      "milestone": "M2",
+      "title": "De-glow/de-emoji audit and icon set",
+      "depends": [
+        "FE-002",
+        "FE-005"
+      ],
+      "owner": "implementer-11",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "remove glows/pulse/badgePop/emoji; add inline-SVG Icon component",
+      "acceptance": [
+        "no box-shadow glow, no text-shadow, no decorative keyframes",
+        "no emoji in UI copy",
+        "icon set covers all current glyph needs"
+      ],
+      "verification": [
+        "grep audit for glow/gradient/emoji",
+        "visual review"
+      ],
+      "evidence": ".agents/FE-014-implementer-11/EVIDENCE.md",
+      "notes": "",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "audit",
+          "run": "rg 'box-shadow|text-shadow|blur\\(' src/assets/styles",
+          "expect": "no glow/shadow applied to UI chrome"
+        },
+        {
+          "id": "T2",
+          "type": "audit",
+          "run": "grep emoji ranges in src",
+          "expect": "no emoji in UI copy"
+        }
+      ]
+    },
+    {
+      "id": "FE-020",
+      "kind": "impl",
+      "phase": "2 - Candidate",
+      "milestone": "M3",
+      "title": "Slim app shell and candidate header",
+      "depends": [
+        "FE-012",
+        "FE-014"
+      ],
+      "owner": "implementer-14",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "AppShell + 52px candidate header (name, progress, timer, Flag, Submit, overflow)",
+      "acceptance": [
+        "header shows only primary controls; secondary in overflow menu",
+        "session-id copy and admin End/Reset moved to overflow",
+        "responsive at 1366x768 and 1920x1080"
+      ],
+      "verification": [
+        "visual review at both resolutions",
+        "axe pass"
+      ],
+      "evidence": ".agents/FE-020-implementer-14/EVIDENCE.md",
+      "notes": "",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "e2e",
+          "run": "load candidate view",
+          "expect": "header shows name/progress/timer/Flag/Submit; secondary in overflow"
+        },
+        {
+          "id": "T2",
+          "type": "audit",
+          "run": "screenshot at 1366x768 and 1920x1080",
+          "expect": "no overflow/clipping"
+        }
+      ]
+    },
+    {
+      "id": "FE-021",
+      "kind": "impl",
+      "phase": "2 - Candidate",
+      "milestone": "M3",
+      "title": "Split-pane workspace prioritization",
+      "depends": [
+        "FE-020"
+      ],
+      "owner": "implementer-17",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "default split [24,76] min [300,520], persistence, double-click reset, collapse-left toggle, 36px tab bar",
+      "acceptance": [
+        "right pane gets >=76% by default",
+        "split ratio persists across reloads",
+        "collapse toggle maximizes workspace"
+      ],
+      "verification": [
+        "manual drag + reload",
+        "localStorage inspect"
+      ],
+      "evidence": ".agents/FE-021-implementer-17/EVIDENCE.md",
+      "notes": "",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "manual",
+          "run": "load workspace",
+          "expect": "right pane >=76% width"
+        },
+        {
+          "id": "T2",
+          "type": "manual",
+          "run": "drag gutter then reload",
+          "expect": "ratio persisted in localStorage"
+        },
+        {
+          "id": "T3",
+          "type": "manual",
+          "run": "toggle collapse-left",
+          "expect": "left hidden, workspace full width"
+        }
+      ]
+    },
+    {
+      "id": "FE-022",
+      "kind": "impl",
+      "phase": "2 - Candidate",
+      "milestone": "M3",
+      "title": "Task pane, markdown, DOMPurify, code copy",
+      "depends": [
+        "FE-012"
+      ],
+      "owner": "implementer-9",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "task header badges, markdown body (marked + DOMPurify + highlight), inline/block code copy",
+      "acceptance": [
+        "markdown sanitized via DOMPurify",
+        "code copy works for inline and blocks with feedback",
+        "badges use neutral chips + semantic status only"
+      ],
+      "verification": [
+        "npm run test",
+        "XSS payload render is sanitized"
+      ],
+      "evidence": ".agents/FE-022-implementer-9/EVIDENCE.md",
+      "notes": "",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "unit",
+          "run": "render '<img src=x onerror=alert(1)>'",
+          "expect": "sanitized by DOMPurify"
+        },
+        {
+          "id": "T2",
+          "type": "manual",
+          "run": "click inline code and block copy",
+          "expect": "copied with visible feedback"
+        }
+      ]
+    },
+    {
+      "id": "FE-023",
+      "kind": "impl",
+      "phase": "2 - Candidate",
+      "milestone": "M3",
+      "title": "Timer via session WS with poll fallback",
+      "depends": [
+        "FE-004"
+      ],
+      "owner": "implementer-10",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "useTimer consuming timer_tick + /api/timer fallback; warning/critical states without pulse glow",
+      "acceptance": [
+        "timer stays in sync with server_timestamp",
+        "reconnects and continues correctly",
+        "warning/critical styles use color only"
+      ],
+      "verification": [
+        "manual: start exam, observe ticks",
+        "simulate WS drop"
+      ],
+      "evidence": ".agents/FE-023-implementer-10/EVIDENCE.md",
+      "notes": "",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "integration",
+          "run": "start exam, watch timer",
+          "expect": "updates on timer_tick"
+        },
+        {
+          "id": "T2",
+          "type": "manual",
+          "run": "drop WS then reconnect",
+          "expect": "poll fallback within 5s; resyncs"
+        }
+      ]
+    },
+    {
+      "id": "FE-024",
+      "kind": "impl",
+      "phase": "2 - Candidate",
+      "milestone": "M3",
+      "title": "Question drawer, presets modal, scorecard",
+      "depends": [
+        "FE-013"
+      ],
+      "owner": "implementer-12",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "question navigator, preset selector (admin), full curriculum card, final scorecard",
+      "acceptance": [
+        "navigator reflects flagged/current/score states",
+        "scorecard matches /api/action/submit payload",
+        "no emoji in preset cards"
+      ],
+      "verification": [
+        "manual end-to-end",
+        "compare scorecard numbers"
+      ],
+      "evidence": ".agents/FE-024-implementer-12/EVIDENCE.md",
+      "notes": "",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "e2e",
+          "run": "open question drawer",
+          "expect": "current/flagged/score states correct"
+        },
+        {
+          "id": "T2",
+          "type": "e2e",
+          "run": "submit exam",
+          "expect": "scorecard totals equal /api/action/submit payload"
+        }
+      ]
+    },
+    {
+      "id": "FE-025",
+      "kind": "impl",
+      "phase": "2 - Candidate",
+      "milestone": "M3",
+      "title": "XTerm island",
+      "depends": [
+        "FE-003"
+      ],
+      "owner": "implementer-15",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "XTerm.vue wrapping xterm + addon-fit with /ws/terminal, resize, buffered replay",
+      "acceptance": [
+        "connects to /ws/terminal/<sid>",
+        "resize messages sent on container resize",
+        "scrollback buffer replayed on reconnect"
+      ],
+      "verification": [
+        "manual terminal interaction",
+        "inspect WS frames"
+      ],
+      "evidence": ".agents/FE-025-implementer-15/orchestrator-resolution.md",
+      "notes": "Pin xterm 5.5.0 + addon-fit 0.10.0.",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "integration",
+          "run": "run `echo hi` in terminal",
+          "expect": "output returned over /ws/terminal/<sid>"
+        },
+        {
+          "id": "T2",
+          "type": "manual",
+          "run": "resize then reconnect",
+          "expect": "fits container; buffer replayed"
+        }
+      ]
+    },
+    {
+      "id": "FE-026",
+      "kind": "impl",
+      "phase": "2 - Candidate",
+      "milestone": "M3",
+      "title": "noVNC island and workspace tabs",
+      "depends": [
+        "FE-003"
+      ],
+      "owner": "implementer-18",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "NoVncFrame.vue + segmented Desktop/Terminal switch preserving iframe URL/params",
+      "acceptance": [
+        "desktop iframe URL/params match current behavior",
+        "tab switch preserves iframe state",
+        "clipboard/allowed attrs preserved"
+      ],
+      "verification": [
+        "manual desktop connect",
+        "compare iframe src to legacy"
+      ],
+      "evidence": ".agents/FE-026-implementer-18/EVIDENCE.md",
+      "notes": "Critical parity item.",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "manual",
+          "run": "load desktop tab",
+          "expect": "noVNC connects; iframe src/params match legacy"
+        },
+        {
+          "id": "T2",
+          "type": "manual",
+          "run": "switch tabs and back",
+          "expect": "desktop session preserved"
+        }
+      ]
+    },
+    {
+      "id": "FE-027",
+      "kind": "impl",
+      "phase": "2 - Candidate",
+      "milestone": "M3",
+      "title": "Clipboard sync composable",
+      "depends": [
+        "FE-026"
+      ],
+      "owner": "implementer-20",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "useClipboard: host<->VNC sync via WS + /api/clipboard, user-gesture flush",
+      "acceptance": [
+        "copy in host reaches desktop and vice-versa",
+        "pending-flush logic preserved verbatim for permission",
+        "no busy polling when WS connected"
+      ],
+      "verification": [
+        "manual bidirectional copy",
+        "inspect network/WS"
+      ],
+      "evidence": ".agents/FE-027-implementer-20/EVIDENCE.md",
+      "notes": "Port pendingHostClipboardText logic exactly.",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "manual",
+          "run": "copy host -> desktop",
+          "expect": "text pastes in desktop"
+        },
+        {
+          "id": "T2",
+          "type": "manual",
+          "run": "copy desktop -> host",
+          "expect": "text pastes in browser"
+        },
+        {
+          "id": "T3",
+          "type": "integration",
+          "run": "watch network while WS connected",
+          "expect": "no /api/clipboard polling"
+        }
+      ]
+    },
+    {
+      "id": "FE-028",
+      "kind": "impl",
+      "phase": "2 - Candidate",
+      "milestone": "M3",
+      "title": "Fullscreen anti-cheat composable",
+      "depends": [
+        "FE-020"
+      ],
+      "owner": "implementer-21",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "useFullscreen: auto-fullscreen on start, warning overlay on exit, keyboard lock where supported",
+      "acceptance": [
+        "warning overlay shows on fullscreen exit",
+        "candidate mode enforces lock; admin bypass",
+        "graceful on unsupported browsers"
+      ],
+      "verification": [
+        "manual Chrome + Firefox",
+        "toggle fullscreen"
+      ],
+      "evidence": ".agents/FE-028-implementer-21/EVIDENCE.md",
+      "notes": "Isolate all browser-specific logic here.",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "manual",
+          "run": "start exam then exit fullscreen",
+          "expect": "warning overlay shown"
+        },
+        {
+          "id": "T2",
+          "type": "manual",
+          "run": "admin mode fullscreen",
+          "expect": "no lock enforced"
+        },
+        {
+          "id": "T3",
+          "type": "manual",
+          "run": "Firefox unsupported lock",
+          "expect": "degrades without breaking exam"
+        }
+      ]
+    },
+    {
+      "id": "FE-029",
+      "kind": "impl",
+      "phase": "2 - Candidate",
+      "milestone": "M3",
+      "title": "Recordings list and replay island",
+      "depends": [
+        "FE-025"
+      ],
+      "owner": "implementer-23",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "ReplayPlayer.vue parsing asciinema cast + event timeline, scrubber, speed",
+      "acceptance": [
+        "cast parses and plays in xterm",
+        "scrubber + play/pause + speed work",
+        "event timeline synced to replay position"
+      ],
+      "verification": [
+        "manual replay of a real recording",
+        "compare timeline events"
+      ],
+      "evidence": ".agents/FE-029-implementer-23/EVIDENCE.md",
+      "notes": "",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "integration",
+          "run": "open a cast recording",
+          "expect": "terminal plays the session"
+        },
+        {
+          "id": "T2",
+          "type": "manual",
+          "run": "scrub / speed / pause",
+          "expect": "controls work; timeline highlight syncs"
+        }
+      ]
+    },
+    {
+      "id": "FE-030",
+      "kind": "impl",
+      "phase": "3 - Admin",
+      "milestone": "M4",
+      "title": "Admin auth guard and login",
+      "depends": [
+        "FE-012"
+      ],
+      "owner": "implementer-13",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "vue-router guard + /admin login flow using /api/admin/login, logout, check",
+      "acceptance": [
+        "unauthenticated /admin redirects to login",
+        "cookie/bearer handled by client",
+        "role guard generalized for future FS-002"
+      ],
+      "verification": [
+        "manual login/logout",
+        "curl /api/admin/check"
+      ],
+      "evidence": ".agents/FE-030-implementer-13/EVIDENCE.md",
+      "notes": "Generalize guard to roles now.",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "e2e",
+          "run": "visit /admin unauthenticated",
+          "expect": "redirect to login"
+        },
+        {
+          "id": "T2",
+          "type": "e2e",
+          "run": "bad creds then good creds",
+          "expect": "error toast then dashboard"
+        },
+        {
+          "id": "T3",
+          "type": "integration",
+          "run": "logout then /api/admin/check",
+          "expect": "authenticated=false"
+        }
+      ]
+    },
+    {
+      "id": "FE-031",
+      "kind": "impl",
+      "phase": "3 - Admin",
+      "milestone": "M4",
+      "title": "Admin sessions table and actions",
+      "depends": [
+        "FE-013",
+        "FE-011"
+      ],
+      "owner": "implementer-16",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "DataTable of sessions/invites/history + terminate/reset/end via confirm dialog",
+      "acceptance": [
+        "table sorting/filtering/pagination",
+        "actions call correct admin endpoints",
+        "no native confirm/alert"
+      ],
+      "verification": [
+        "manual full admin flow",
+        "verify endpoint calls"
+      ],
+      "evidence": ".agents/FE-031-implementer-16/EVIDENCE.md",
+      "notes": "Leave room for an assign-to-user action (FS-004).",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "e2e",
+          "run": "terminate/reset/end from table",
+          "expect": "confirm dialog then correct endpoint hit"
+        },
+        {
+          "id": "T2",
+          "type": "audit",
+          "run": "grep built bundle for alert(/confirm(",
+          "expect": "none"
+        }
+      ]
+    },
+    {
+      "id": "FE-032",
+      "kind": "impl",
+      "phase": "3 - Admin",
+      "milestone": "M4",
+      "title": "Admin config and resource forms",
+      "depends": [
+        "FE-012"
+      ],
+      "owner": "implementer-22",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "default preset selector + max concurrent sessions form with validation + toasts",
+      "acceptance": [
+        "forms reflect /api/admin/config and /api/admin/resources",
+        "validation errors shown via toast/inline",
+        "success feedback via toast"
+      ],
+      "verification": [
+        "manual save/load",
+        "invalid input path"
+      ],
+      "evidence": ".agents/FE-032-implementer-22/EVIDENCE.md",
+      "notes": "",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "e2e",
+          "run": "set default preset, reload",
+          "expect": "value persists from /api/admin/config"
+        },
+        {
+          "id": "T2",
+          "type": "e2e",
+          "run": "submit invalid max sessions",
+          "expect": "inline/toast error, no save"
+        }
+      ]
+    },
+    {
+      "id": "FE-033",
+      "kind": "impl",
+      "phase": "3 - Admin",
+      "milestone": "M4",
+      "title": "Admin create invite",
+      "depends": [
+        "FE-031"
+      ],
+      "owner": "implementer-fe033",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "create session invite (optional preset) with copyable URL",
+      "acceptance": [
+        "invite created via /api/admin/sessions/create",
+        "URL copied with toast feedback",
+        "capacity-limit errors surfaced"
+      ],
+      "verification": [
+        "manual create invite",
+        "open generated URL"
+      ],
+      "evidence": ".agents/FE-033-verifier-fe033/EVIDENCE.md",
+      "notes": "",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "e2e",
+          "run": "create invite and open URL",
+          "expect": "invited start screen for its preset"
+        }
+      ]
+    },
+    {
+      "id": "FE-034",
+      "kind": "impl",
+      "phase": "3 - Admin",
+      "milestone": "M4",
+      "title": "Admin infrastructure table",
+      "depends": [
+        "FE-013"
+      ],
+      "owner": "implementer-24",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "infrastructure/resources DataTable + terminate resource action",
+      "acceptance": [
+        "nodes + docker + incus resources listed",
+        "terminate calls /api/admin/infrastructure/terminate",
+        "confirmation via dialog"
+      ],
+      "verification": [
+        "manual list + terminate a test resource"
+      ],
+      "evidence": ".agents/FE-034-implementer-24/EVIDENCE.md",
+      "notes": "",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "e2e",
+          "run": "list then terminate a test resource",
+          "expect": "row removed, endpoint hit, confirm dialog"
+        }
+      ]
+    },
+    {
+      "id": "FE-035",
+      "kind": "impl",
+      "phase": "3 - Admin",
+      "milestone": "M4",
+      "title": "Admin live observe view",
+      "depends": [
+        "FE-025",
+        "FE-026"
+      ],
+      "owner": "implementer-25",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "observe overlay reusing XTerm + NoVNC islands per session",
+      "acceptance": [
+        "observe connects to the selected session only",
+        "admin reset/end available in observe",
+        "no cross-session leakage"
+      ],
+      "verification": [
+        "manual observe active session",
+        "verify admin WS attach rules"
+      ],
+      "evidence": ".agents/FE-035-implementer-25/EVIDENCE.md",
+      "notes": "Matches server-side explicit-session enforcement.",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "e2e",
+          "run": "observe active session",
+          "expect": "terminal/desktop attach; reset/end work"
+        },
+        {
+          "id": "T2",
+          "type": "integration",
+          "run": "attempt cross-session attach",
+          "expect": "rejected (server close 1008)"
+        }
+      ]
+    },
+    {
+      "id": "FE-036",
+      "kind": "impl",
+      "phase": "3 - Admin",
+      "milestone": "M4",
+      "title": "Admin session actions: tighter dialog spacing + non-blocking per-row loading",
+      "depends": [
+        "FE-031"
+      ],
+      "owner": "implementer-19",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "Admin reset/terminate/end UX: reduce excessive dialog margin and make long-running actions non-blocking (GCP-style) so one in-flight action never locks the rest of the admin sessions page.",
+      "acceptance": [
+        "admin action/confirm dialogs use tighter, consistent spacing (no excessive margin/padding)",
+        "starting an action shows a per-row/inline busy state but does NOT block opening or acting on other sessions",
+        "the sessions table stays populated during a mutation (no full-table loading blank); only the affected row's actions are disabled",
+        "results are still reported via toast and actions still go through the promise confirm dialog (no native dialogs)"
+      ],
+      "verification": [
+        "bunx vue-tsc --noEmit",
+        "unit: useAdminSessions exposes per-row pending state",
+        "manual/e2e: while one row is resetting, another row can be opened and actioned"
+      ],
+      "tests": [
+        {
+          "id": "T1",
+          "type": "unit",
+          "run": "useAdminSessions per-row pending: isRowPending(id) true only for the acting row",
+          "expect": "other identifiers report not pending"
+        },
+        {
+          "id": "T2",
+          "type": "e2e",
+          "run": "trigger a slow action on row A; confirm row B is still clickable and the table stays populated",
+          "expect": "no global block; inline busy on row A"
+        }
+      ],
+      "evidence": ".agents/FE-036-implementer-19/EVIDENCE.md",
+      "notes": "UX follow-up to FE-031 raised by the user."
+    },
+    {
+      "id": "FE-040",
+      "kind": "impl",
+      "phase": "4 - Cutover",
+      "milestone": "M5",
+      "title": "Legacy removal and static cutover",
+      "depends": [
+        "FE-020",
+        "FE-021",
+        "FE-022",
+        "FE-023",
+        "FE-024",
+        "FE-025",
+        "FE-026",
+        "FE-027",
+        "FE-028",
+        "FE-029",
+        "FE-030",
+        "FE-031",
+        "FE-032",
+        "FE-033",
+        "FE-034",
+        "FE-035"
+      ],
+      "owner": "implementer-fe040",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "remove web/static app.js/admin.js/old HTML; serve only built SPA; update server mounts",
+      "acceptance": [
+        "legacy files deleted",
+        "all routes serve from web/dist",
+        "no 404s or dead references"
+      ],
+      "verification": [
+        "grep for legacy references",
+        "navigate all routes"
+      ],
+      "evidence": ".agents/fe040-verifier/EVIDENCE.md",
+      "notes": "",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "audit",
+          "run": "grep for app.js/admin.js/legacy refs",
+          "expect": "no references remain"
+        },
+        {
+          "id": "T2",
+          "type": "integration",
+          "run": "navigate / and /admin",
+          "expect": "served from web/dist, no 404/dead refs"
+        }
+      ]
+    },
+    {
+      "id": "FE-041",
+      "kind": "impl",
+      "phase": "4 - Cutover",
+      "milestone": "M5",
+      "title": "Self-host fonts and dependencies (offline)",
+      "depends": [
+        "FE-040"
+      ],
+      "owner": "implementer-fe041",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "no runtime CDN calls; Inter + JetBrains Mono + all libs bundled",
+      "acceptance": [
+        "network tab shows no external requests",
+        "assets served from same origin",
+        "offline load renders correctly"
+      ],
+      "verification": [
+        "devtools network audit",
+        "load with network disabled"
+      ],
+      "evidence": ".agents/fe041-043-verifier/EVIDENCE.md",
+      "notes": "",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "audit",
+          "run": "devtools network audit",
+          "expect": "no external domains"
+        },
+        {
+          "id": "T2",
+          "type": "manual",
+          "run": "load with network disabled",
+          "expect": "fully styled, functions"
+        }
+      ]
+    },
+    {
+      "id": "FE-042",
+      "kind": "impl",
+      "phase": "4 - Cutover",
+      "milestone": "M5",
+      "title": "Playwright E2E and axe accessibility",
+      "depends": [
+        "FE-040"
+      ],
+      "owner": "implementer-fe042",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "E2E journeys (start -> navigate -> submit; admin) + axe checks",
+      "acceptance": [
+        "E2E covers candidate + admin critical paths",
+        "axe reports no critical violations",
+        "runs headless in CI/local"
+      ],
+      "verification": [
+        "npx playwright test",
+        "axe report"
+      ],
+      "evidence": ".agents/fe041-043-verifier/EVIDENCE.md",
+      "notes": "",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "e2e",
+          "run": "npx playwright test  (host-only; requires npx playwright install)",
+          "expect": "all journeys pass"
+        },
+        {
+          "id": "T2",
+          "type": "audit",
+          "run": "axe scan  (browser, host-only)",
+          "expect": "no critical violations"
+        }
+      ]
+    },
+    {
+      "id": "FE-043",
+      "kind": "impl",
+      "phase": "4 - Cutover",
+      "milestone": "M5",
+      "title": "Update docs (README, HANDOVER, PLATFORM_SETUP)",
+      "depends": [
+        "FE-040"
+      ],
+      "owner": "implementer-fe043",
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "document build-on-deploy, dev workflow, new frontend structure",
+      "acceptance": [
+        "README reflects Vite build step",
+        "HANDOVER documents frontend architecture",
+        "PLATFORM_SETUP lists Node requirement"
+      ],
+      "verification": [
+        "follow docs from clean state"
+      ],
+      "evidence": ".agents/fe041-043-verifier/EVIDENCE.md",
+      "notes": "",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "manual",
+          "run": "follow docs on clean host",
+          "expect": "build + run succeeds"
+        },
+        {
+          "id": "T2",
+          "type": "audit",
+          "run": "check docs",
+          "expect": "Node requirement + build-on-deploy documented"
+        }
+      ]
+    },
+    {
+      "id": "FE-044",
+      "kind": "impl",
+      "phase": "4 - Cutover",
+      "milestone": "M5",
+      "title": "Full regression against real backend",
+      "depends": [
+        "FE-042"
+      ],
+      "owner": null,
+      "status": "verified",
+      "verifier": "independent-agent",
+      "deliverable": "end-to-end regression vs platform host: candidate full exam + admin lifecycle",
+      "acceptance": [
+        "full exam completes with correct scorecard",
+        "admin terminate/reset/end verified",
+        "no console errors or regressions"
+      ],
+      "verification": [
+        "run against platform host",
+        "capture scorecard + logs"
+      ],
+      "evidence": ".agents/FE-044-regression/EVIDENCE.md",
+      "notes": "Precedes FE-V5 victory audit.",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "e2e",
+          "run": "full exam vs platform host",
+          "expect": "completes with correct scorecard"
+        },
+        {
+          "id": "T2",
+          "type": "e2e",
+          "run": "admin terminate/reset/end",
+          "expect": "all succeed"
+        },
+        {
+          "id": "T3",
+          "type": "audit",
+          "run": "browser console",
+          "expect": "no errors/warnings"
+        }
+      ]
+    },
+    {
+      "id": "FE-V1",
+      "kind": "verify",
+      "phase": "0 - Foundation",
+      "milestone": "M1",
+      "title": "M1 gate - independent verification",
+      "depends": [
+        "FE-000",
+        "FE-001",
+        "FE-002",
+        "FE-003",
+        "FE-004",
+        "FE-005"
+      ],
+      "owner": null,
+      "status": "verified",
+      "verifier": null,
+      "deliverable": "independent gate verification of all M1 tasks",
+      "acceptance": [
+        "each M1 task independently verified with evidence",
+        "build + serve + typed API smoke verified on platform host"
+      ],
+      "verification": [
+        "re-run all M1 acceptance on clean checkout"
+      ],
+      "evidence": ".agents/FE-V1-gate/EVIDENCE.md",
+      "notes": "Performed by an agent that did not implement the tasks.",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "audit",
+          "run": "re-run all M1 acceptance + tests on clean checkout",
+          "expect": "all pass; each M1 task verified with evidence"
+        }
+      ]
+    },
+    {
+      "id": "FE-V2",
+      "kind": "verify",
+      "phase": "1 - UI system",
+      "milestone": "M2",
+      "title": "M2 gate - independent verification",
+      "depends": [
+        "FE-010",
+        "FE-011",
+        "FE-012",
+        "FE-013",
+        "FE-014"
+      ],
+      "owner": "fe-v2-audit",
+      "status": "verified",
+      "verifier": null,
+      "deliverable": "independent gate verification of all M2 tasks",
+      "acceptance": [
+        "tokens audited, no raw hex/glow/emoji",
+        "toasts/dialogs/table/a11y verified"
+      ],
+      "verification": [
+        "re-run all M2 acceptance on clean checkout"
+      ],
+      "evidence": ".agents/FE-V2-gate/EVIDENCE.md",
+      "notes": "",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "audit",
+          "run": "re-run all M2 acceptance + tests",
+          "expect": "tokens audit clean; dialogs/table/a11y pass"
+        }
+      ]
+    },
+    {
+      "id": "FE-V3",
+      "kind": "verify",
+      "phase": "2 - Candidate",
+      "milestone": "M3",
+      "title": "M3 gate - candidate parity verification",
+      "depends": [
+        "FE-020",
+        "FE-021",
+        "FE-022",
+        "FE-023",
+        "FE-024",
+        "FE-025",
+        "FE-026",
+        "FE-027",
+        "FE-028",
+        "FE-029"
+      ],
+      "owner": null,
+      "status": "verified",
+      "verifier": null,
+      "deliverable": "independent candidate parity verification",
+      "acceptance": [
+        "full exam journey at 1366x768 and 1920x1080",
+        "WS/clipboard/timer/anti-cheat/replay parity confirmed"
+      ],
+      "verification": [
+        "manual + automated candidate journey"
+      ],
+      "evidence": ".agents/FE-V3-gate/EVIDENCE.md",
+      "notes": "Strict parity gate (D-007).",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "audit",
+          "run": "candidate journey at 1366x768 + 1920x1080",
+          "expect": "parity: WS, clipboard, timer, anti-cheat, replay"
+        }
+      ]
+    },
+    {
+      "id": "FE-V4",
+      "kind": "verify",
+      "phase": "3 - Admin",
+      "milestone": "M4",
+      "title": "M4 gate - admin verification",
+      "depends": [
+        "FE-030",
+        "FE-031",
+        "FE-032",
+        "FE-033",
+        "FE-034",
+        "FE-035",
+        "FE-036"
+      ],
+      "owner": null,
+      "status": "verified",
+      "verifier": null,
+      "deliverable": "independent admin verification",
+      "acceptance": [
+        "all admin actions work via new dialogs/tables",
+        "no native dialogs remain"
+      ],
+      "verification": [
+        "manual admin lifecycle"
+      ],
+      "evidence": ".agents/FE-V4-gate/EVIDENCE.md",
+      "notes": "",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "audit",
+          "run": "admin lifecycle",
+          "expect": "all actions via dialogs/tables; no native dialogs"
+        }
+      ]
+    },
+    {
+      "id": "FE-V5",
+      "kind": "verify",
+      "phase": "4 - Cutover",
+      "milestone": "M5",
+      "title": "M5 gate - victory audit",
+      "depends": [
+        "FE-040",
+        "FE-041",
+        "FE-042",
+        "FE-043",
+        "FE-044"
+      ],
+      "owner": null,
+      "status": "verified",
+      "verifier": null,
+      "deliverable": "independent victory audit of the migration",
+      "acceptance": [
+        "all M1-M5 gates verified",
+        "legacy removed, offline verified, docs updated",
+        "no open critical issues"
+      ],
+      "verification": [
+        "end-to-end audit on clean checkout"
+      ],
+      "evidence": ".agents/FE-V5-gate/EVIDENCE.md",
+      "notes": "Matches existing victory-auditor pattern.",
+      "tests": [
+        {
+          "id": "T1",
+          "type": "audit",
+          "run": "end-to-end victory audit on clean checkout",
+          "expect": "all gates verified; legacy gone; offline verified; docs updated"
+        }
+      ]
+    },
+    {
+      "id": "FS-001",
+      "kind": "future",
+      "phase": "Future (FS)",
+      "milestone": null,
+      "title": "Auth backend (users, roles, hashing, login/logout)",
+      "depends": [
+        "FE-004"
+      ],
+      "owner": "opencode",
+      "status": "verified",
+      "verifier": null,
+      "deliverable": "user store + role claims + password hashing + login/logout/session endpoints",
+      "acceptance": [
+        "roles admin/user",
+        "secure hashing",
+        "session cookie/JWT"
+      ],
+      "verification": [
+        "security review + endpoint tests"
+      ],
+      "evidence": ".agents/FS-001-opencode/EVIDENCE.md",
+      "notes": "Future scope (D-009).",
+      "tests": []
+    },
+    {
+      "id": "FS-002",
+      "kind": "future",
+      "phase": "Future (FS)",
+      "milestone": null,
+      "title": "Auth frontend (/login, auth store, guards)",
+      "depends": [
+        "FS-001"
+      ],
+      "owner": "opencode",
+      "status": "verified",
+      "verifier": null,
+      "deliverable": "/login route, auth Pinia store, role guards",
+      "acceptance": [
+        "login persists session",
+        "guards by role",
+        "logout clears state"
+      ],
+      "verification": [
+        "manual role flows"
+      ],
+      "evidence": ".agents/FS-002-opencode/EVIDENCE.md",
+      "notes": "Routes stubbed during migration.",
+      "tests": []
+    },
+    {
+      "id": "FS-003",
+      "kind": "future",
+      "phase": "Future (FS)",
+      "milestone": null,
+      "title": "Session ownership model",
+      "depends": [
+        "FS-001"
+      ],
+      "owner": "opencode",
+      "status": "verified",
+      "verifier": null,
+      "deliverable": "ExamSession ownership fields + per-user session storage",
+      "acceptance": [
+        "sessions owned by user",
+        "assigned_by recorded"
+      ],
+      "verification": [
+        "migration test of session data"
+      ],
+      "evidence": ".agents/FS-003-opencode/EVIDENCE.md",
+      "notes": "Replaces single global var/session.json.",
+      "tests": []
+    },
+    {
+      "id": "FS-004",
+      "kind": "future",
+      "phase": "Future (FS)",
+      "milestone": null,
+      "title": "Admin assigns exam to user",
+      "depends": [
+        "FS-003"
+      ],
+      "owner": "opencode",
+      "status": "verified",
+      "verifier": null,
+      "deliverable": "assignment UI + API",
+      "acceptance": [
+        "admin assigns preset to user",
+        "assignment visible to user"
+      ],
+      "verification": [
+        "end-to-end assign/start"
+      ],
+      "evidence": ".agents/FS-004-opencode/EVIDENCE.md",
+      "notes": "",
+      "tests": []
+    },
+    {
+      "id": "FS-005",
+      "kind": "future",
+      "phase": "Future (FS)",
+      "milestone": null,
+      "title": "User dashboard (own exams only)",
+      "depends": [
+        "FS-002",
+        "FS-004"
+      ],
+      "owner": "opencode",
+      "status": "verified",
+      "verifier": null,
+      "deliverable": "/dashboard listing only the user's exams",
+      "acceptance": [
+        "no full catalog exposed",
+        "start assigned exam from dashboard"
+      ],
+      "verification": [
+        "manual user flow"
+      ],
+      "evidence": ".agents/FS-005-opencode/EVIDENCE.md",
+      "notes": "",
+      "tests": []
+    },
+    {
+      "id": "FS-006",
+      "kind": "future",
+      "phase": "Future (FS)",
+      "milestone": null,
+      "title": "Dynamic preset generator API",
+      "depends": [
+        "FE-004"
+      ],
+      "owner": "opencode",
+      "status": "verified",
+      "verifier": null,
+      "deliverable": "POST /api/presets/generate {count, difficulty, domains?} -> ephemeral preset + session",
+      "acceptance": [
+        "selects N questions by difficulty",
+        "creates session without listing questions"
+      ],
+      "verification": [
+        "API tests for counts/difficulties"
+      ],
+      "evidence": ".agents/FS-006-opencode/EVIDENCE.md",
+      "notes": "Build on QuestionSelector + deploy_sequential.",
+      "tests": []
+    },
+    {
+      "id": "FS-007",
+      "kind": "future",
+      "phase": "Future (FS)",
+      "milestone": null,
+      "title": "Custom exam builder UI",
+      "depends": [
+        "FS-006"
+      ],
+      "owner": "opencode",
+      "status": "verified",
+      "verifier": null,
+      "deliverable": "count + difficulty (+ domains) builder, no question listing",
+      "acceptance": [
+        "generates and starts exam",
+        "no individual questions shown"
+      ],
+      "verification": [
+        "manual builder flow"
+      ],
+      "evidence": ".agents/FS-007-opencode/EVIDENCE.md",
+      "notes": "",
+      "tests": []
+    },
+    {
+      "id": "FS-008",
+      "kind": "future",
+      "phase": "Future (FS)",
+      "milestone": null,
+      "title": "Hide preset catalog from non-admin users",
+      "depends": [
+        "FS-002"
+      ],
+      "owner": "opencode",
+      "status": "verified",
+      "verifier": null,
+      "deliverable": "catalog visible only to admins; users see assignments only",
+      "acceptance": [
+        "non-admin cannot enumerate presets",
+        "API authorization enforced"
+      ],
+      "verification": [
+        "authorization tests"
+      ],
+      "evidence": ".agents/FS-008-opencode/EVIDENCE.md",
+      "notes": "",
+      "tests": []
+    },
+    {
+      "id": "FS-003b",
+      "kind": "future",
+      "phase": "Future (FS)",
+      "milestone": null,
+      "title": "Concurrent per-user sessions (multi-session)",
+      "depends": [
+        "FS-003",
+        "FS-004"
+      ],
+      "owner": null,
+      "status": "verified",
+      "verifier": null,
+      "deliverable": "true per-user concurrent active sessions (each user owns an independent session); remove the single-active-session assumption from terminal/VNC/reaper resolution",
+      "acceptance": [
+        "two users run exams concurrently",
+        "terminal/VNC resolve per session, not session:active:id"
+      ],
+      "verification": [
+        "concurrency integration test"
+      ],
+      "evidence": ".agents/FS-003b-opencode/EVIDENCE.md",
+      "notes": "FS-003 retires var/session.json and records ownership; multi-session is deferred here. Depends on FS-004 assignment.",
+      "tests": []
+    },
+    {
+      "id": "FS-009",
+      "kind": "future",
+      "phase": "Future (FS)",
+      "milestone": null,
+      "title": "Per-terminal channel recording, conditional provisioning and admin notifications",
+      "depends": [
+        "FS-003b"
+      ],
+      "owner": "opencode",
+      "status": "verified",
+      "verifier": null,
+      "deliverable": "per-channel terminal recording (user-web/admin-web/user-desktop) with channel-filtered replay, context-conditional sandbox provisioning, and admin -> candidate desktop notifications",
+      "acceptance": [
+        "desktop terminal input+output recorded and replayable",
+        "replay filters events per channel (User Web/Desktop, Admin)",
+        "admin notification appears as a native desktop popup",
+        "only the sandboxes a session needs are provisioned"
+      ],
+      "verification": [
+        "unit tests + host smoke"
+      ],
+      "evidence": ".agents/FS-009-opencode/EVIDENCE.md",
+      "notes": "Delivered alongside FS-003b (P1-P4 plan in HANDOVER). Notification via notify-send/xfce4-notifyd; image tags pre-p4/pre-notify/pre-notifyd.",
+      "tests": []
+    }
+  ]
+}

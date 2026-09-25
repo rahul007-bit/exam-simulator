@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 from core.models import Question, ExamSession
 from core.loader import QuestionLoader
+from core.recorder import recorder
 
 SYSTEM_NAMESPACES = {"default", "kube-system", "kube-public", "kube-node-lease", "metallb-system", "local-path-storage"}
 
@@ -15,20 +16,45 @@ SYSTEM_NAMESPACES = {"default", "kube-system", "kube-public", "kube-node-lease",
 class LabDeployer:
     def __init__(self, session_file: Optional[Path] = None, sets_dir: Optional[Path] = None):
         self.session_file = session_file or (Path(__file__).parent.parent / "var" / "session.json")
-        self.session_file.parent.mkdir(parents=True, exist_ok=True)
         self.sets_dir = sets_dir or (Path(__file__).parent.parent / "sets")
         self.sets_dir.mkdir(parents=True, exist_ok=True)
 
-    def load_active_session(self, loader: QuestionLoader) -> Optional[ExamSession]:
-        if not self.session_file.exists():
+    def _read_legacy_session(self) -> Optional[Dict[str, Any]]:
+        """One-time read of a legacy session file, renamed to .migrated afterwards."""
+        if not self.session_file or not self.session_file.exists():
             return None
         try:
             with open(self.session_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
+        except Exception as e:
+            print(f"[Warning] Failed to parse active session: {e}")
+            return None
+        try:
+            migrated = self.session_file.with_name(self.session_file.name + ".migrated")
+            self.session_file.rename(migrated)
+        except Exception:
+            pass
+        try:
+            session_id = data.get("session_id")
+            if session_id:
+                from core.redis_bus import bus as redis_bus
+                redis_bus.set_session_state(session_id, data)
+        except Exception:
+            pass
+        return data
+
+    def _session_from_state(self, data: Optional[Dict[str, Any]], loader: QuestionLoader) -> Optional[ExamSession]:
+        if not data:
+            return None
+        # Do not return completed or archived sessions as active
+        if data.get("status") in ("completed", "submitted", "terminated", "replaced"):
+            return None
+        try:
             q_ids = data.get("question_ids", [])
             questions = [loader.get(qid) for qid in q_ids if loader.get(qid) is not None]
             return ExamSession(
                 session_id=data.get("session_id", "default"),
+
                 created_at=data.get("created_at", ""),
                 name=data.get("name", "Active Practice Session"),
                 questions=questions,
@@ -39,14 +65,61 @@ class LabDeployer:
                 scores=data.get("scores", {}),
                 flagged=data.get("flagged", []),
                 scorecard=data.get("scorecard"),
+                status=data.get("status", "active"),
+                last_active_at=data.get("last_active_at"),
+                candidate_token=data.get("candidate_token"),
+                owner_username=data.get("owner_username"),
+                assigned_by=data.get("assigned_by"),
             )
         except Exception as e:
             print(f"[Warning] Failed to parse active session: {e}")
             return None
 
+    def load_session(self, loader: QuestionLoader, session_id: str) -> Optional[ExamSession]:
+        """Loads a specific session by id (FS-003b: per-session resolution)."""
+        if not session_id:
+            return None
+        try:
+            from core.redis_bus import bus as redis_bus
+            data = redis_bus.get_session_state(session_id)
+        except Exception:
+            data = None
+        return self._session_from_state(data, loader)
+
+    def load_active_session(self, loader: QuestionLoader) -> Optional[ExamSession]:
+        """Legacy: the most-recent global session (pointer). Prefer
+        `load_session` / contextual resolution for concurrent sessions."""
+        data = None
+        try:
+            from core.redis_bus import bus as redis_bus
+            data = redis_bus.get_session_state()
+        except Exception:
+            data = None
+
+        if data is None:
+            data = self._read_legacy_session()
+        return self._session_from_state(data, loader)
+
     def save_session(self, session: ExamSession) -> None:
-        with open(self.session_file, "w", encoding="utf-8") as f:
-            json.dump(session.to_dict(), f, indent=2)
+        data = session.to_dict()
+        try:
+            from core.redis_bus import bus as redis_bus
+            redis_bus.set_session_state(session.session_id, data)
+        except Exception:
+            pass
+
+    def clear_active_session(self, session_id: Optional[str] = None) -> None:
+        try:
+            from core.redis_bus import bus as redis_bus
+            redis_bus.clear_session_state(session_id)
+        except Exception:
+            pass
+        try:
+            if self.session_file and self.session_file.exists():
+                self.session_file.unlink(missing_ok=True)
+        except Exception:
+            pass
+
 
     def export_tasks_markdown(self, session: ExamSession) -> Path:
         """Exports the active exam questions as a clean Markdown task sheet in sets/."""
@@ -107,22 +180,49 @@ class LabDeployer:
         with open(active_file, "w", encoding="utf-8") as f:
             f.write(content)
 
-        # Also copy to /home/exam/active_exam.md if candidate home exists
-        exam_home_file = Path("/home/exam/active_exam.md")
-        if Path("/home/exam").exists():
-            try:
-                exam_home_file.write_text(content, encoding="utf-8")
-                os.chmod(exam_home_file, 0o644)
-            except Exception:
-                pass
+        # Store task sheet in Redis for candidate container injection (zero host /home/exam pollution)
+        try:
+            from core.redis_bus import bus as redis_bus
+            client = redis_bus.get_sync_client()
+            if client:
+                client.setex(f"session:{session.session_id}:exam_md", 86400, content)
+                client.setex("k8s:active_exam_md", 86400, content)
+        except Exception:
+            pass
 
         return md_file
 
     def clear_session(self, cleanup_cluster: bool = True) -> None:
-        if self.session_file.exists():
+        active_sid = None
+        try:
+            from core.redis_bus import bus as redis_bus
+            active_sid = redis_bus.get_active_session_id()
+            if active_sid:
+                from core.desktop_manager import desktop_mgr
+                desktop_mgr.stop_desktop(active_sid)
+        except Exception:
+            active_sid = None
+
+        if active_sid:
+            try:
+                recorder.log_event("SESSION_RESET", {"cleanup_cluster": cleanup_cluster})
+                recorder.close()
+            except Exception:
+                pass
             if cleanup_cluster:
                 self._cleanup_cluster_resources()
-            self.session_file.unlink()
+
+        try:
+            from core.redis_bus import bus as redis_bus
+            redis_bus.clear_session_state()
+        except Exception:
+            pass
+
+        try:
+            if self.session_file and self.session_file.exists():
+                self.session_file.unlink()
+        except Exception:
+            pass
 
         active_file = self.sets_dir / "active_exam.md"
         if active_file.exists():
@@ -131,22 +231,14 @@ class LabDeployer:
             except Exception:
                 pass
 
-        exam_home_file = Path("/home/exam/active_exam.md")
-        if exam_home_file.exists():
-            try:
-                exam_home_file.unlink()
-            except Exception:
-                pass
-
     def _cleanup_cluster_resources(self, questions: Optional[List[Question]] = None, exclude_namespace: Optional[str] = None) -> None:
         """Purges test-created namespaces, webhooks, and iptables rules from target contexts."""
         data = None
-        if self.session_file.exists():
-            try:
-                with open(self.session_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-            except Exception:
-                data = None
+        try:
+            from core.redis_bus import bus as redis_bus
+            data = redis_bus.get_session_state()
+        except Exception:
+            data = None
 
         SYSTEM_NAMESPACES = {"default", "kube-system", "kube-public", "kube-node-lease", "metallb-system", "local-path-storage"}
         loader = QuestionLoader()
@@ -221,6 +313,20 @@ class LabDeployer:
                      "strict-policy-enforcer", "admission-hook", "audit-injector", "--ignore-not-found"],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
                 )
+                try:
+                    if questions is None:
+                        subprocess.run(
+                            ["kubectl", "--context", ctx_name, "--request-timeout=3s", "delete", "pv", "--all", "--wait=false"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
+                        )
+                    else:
+                        subprocess.run(
+                            ["kubectl", "--context", ctx_name, "--request-timeout=3s", "delete", "pv",
+                             "--field-selector=status.phase=Released", "--wait=false"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
+                        )
+                except Exception:
+                    pass
             except Exception:
                 pass
 
@@ -338,6 +444,17 @@ class LabDeployer:
             scores={},
         )
         self.save_session(session)
+        try:
+            recorder.start_session(
+                session_id=session.session_id,
+                name=session.name,
+                total_tasks=len(session.questions),
+                time_limit_minutes=time_limit_minutes,
+                target_contexts=target_contexts,
+                questions=[{"id": q.id, "title": q.title, "points": q.points, "context": q.target_context} for q in session.questions],
+            )
+        except Exception:
+            pass
         md_path = self.export_tasks_markdown(session)
         print(f"  Exported task sheet to: {md_path.relative_to(self.sets_dir.parent)}")
 
@@ -368,14 +485,35 @@ class LabDeployer:
             scores={},
         )
         self.save_session(session)
+        try:
+            recorder.start_session(
+                session_id=session.session_id,
+                name=session.name,
+                total_tasks=len(session.questions),
+                time_limit_minutes=time_limit_minutes,
+                target_contexts=session.target_contexts,
+                questions=[{"id": q.id, "title": q.title, "points": q.points, "context": q.target_context} for q in questions],
+            )
+        except Exception:
+            pass
         self.export_tasks_markdown(session)
-        self.deploy_step(session, 0)
+        try:
+            res = subprocess.run(["kubectl", "config", "get-contexts", "-o", "name"], capture_output=True, text=True, timeout=2)
+            if "k3d-cka" in res.stdout.splitlines():
+                self.deploy_step(session, 0)
+        except Exception:
+            pass
         return session
 
-    def deploy_step(self, session: ExamSession, index: int, force_setup: bool = False) -> bool:
+    def deploy_step(self, session: ExamSession, index: int, force_setup: bool = False, progress_cb: Optional[Any] = None) -> bool:
         if index < 0 or index >= len(session.questions):
             print(f"[Error] Task index {index + 1} out of range (1 to {len(session.questions)}).")
             return False
+
+        try:
+            recorder.attach_or_resume(session.session_id, session.name)
+        except Exception:
+            pass
 
         leaving_q = None
         is_leaving_flagged = False
@@ -387,6 +525,9 @@ class LabDeployer:
                 leaving_q.id in flagged_list
                 or getattr(leaving_q, "is_flagged", False)
             )
+
+            if progress_cb:
+                progress_cb("grading", f"Evaluating Task {session.current_index + 1}", 1, 3, f"Evaluating rubric for {leaving_q.title}...")
 
             if is_leaving_flagged:
                 # Do not grade flagged task when switching between tasks
@@ -420,8 +561,24 @@ class LabDeployer:
                         "message": "Evaluation timed out or error",
                     }
 
+            try:
+                leaving_score = session.scores.get(leaving_q.id, {})
+                recorder.log_event("TASK_EVALUATION", {
+                    "task_num": session.current_index + 1,
+                    "question_id": leaving_q.id,
+                    "score": leaving_score.get("score", 0),
+                    "max_score": leaving_score.get("max_score", leaving_q.points),
+                    "passed": leaving_score.get("passed", False),
+                    "message": leaving_score.get("message", ""),
+                })
+            except Exception:
+                pass
+
         session.current_index = index
         q = session.questions[index]
+
+        if progress_cb:
+            progress_cb("cleanup", "Preparing Cluster Environment", 2, 3, "Cleaning ephemeral namespaces and cluster states...")
 
         # Fast cleanup: Only clean leaving task's specific namespace instead of scanning whole cluster.
         # Preserve namespace for flagged tasks so they can be reviewed and graded upon final exam submission!
@@ -457,16 +614,22 @@ class LabDeployer:
                 pass
 
         # Prevent cordoning from leaking across exam tasks
-        if q.target_context == "k3d-cka" and q.id not in ("CA-005", "TR-008", "TR-014"):
+        k3d_ctx = os.getenv("K3D_CONTEXT", "k3d-cka")
+        kubeadm_ctx = os.getenv("KUBEADM_CONTEXT", "kubeadm-vms")
+        k3d_cluster = os.getenv("K3D_CLUSTER_NAME", "cka")
+        if q.target_context == k3d_ctx and q.id not in ("CA-005", "TR-008", "TR-014"):
             try:
-                subprocess.run(["kubectl", "--context", "k3d-cka", "uncordon", "k3d-dev-agent-0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
+                subprocess.run(["kubectl", "--context", k3d_ctx, "uncordon", f"k3d-{k3d_cluster}-agent-0", f"k3d-{k3d_cluster}-agent-1"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
             except Exception:
                 pass
-        elif q.target_context == "kubeadm-vms" and q.id not in ("CA-004", "TR-008", "TR-014"):
+        elif q.target_context == kubeadm_ctx and q.id not in ("CA-004", "TR-008", "TR-014"):
             try:
-                subprocess.run(["kubectl", "--context", "kubeadm-vms", "uncordon", "node2", "node3"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
+                subprocess.run(["kubectl", "--context", kubeadm_ctx, "uncordon", os.getenv("NODE_2", "node2"), os.getenv("NODE_3", "node3")], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
             except Exception:
                 pass
+
+        if progress_cb:
+            progress_cb("deploying", f"Deploying Task {index + 1}", 3, 3, f"Applying manifests for {q.title}...")
 
         print(f"\n[Deployer] Deploying Task {index + 1}/{len(session.questions)}: {q.id} ({q.title})...", end="", flush=True)
 
@@ -476,6 +639,21 @@ class LabDeployer:
             or (session.scores.get(q.id, {}).get("message", "").startswith("Flagged for review"))
         )
 
+        try:
+            recorder.log_event("TASK_DEPLOYED", {
+                "task_num": index + 1,
+                "question_id": q.id,
+                "title": q.title,
+                "domain": q.domain.value if hasattr(q.domain, "value") else str(q.domain),
+                "difficulty": q.difficulty.value if hasattr(q.difficulty, "value") else str(q.difficulty),
+                "context": q.target_context,
+                "namespace": q.namespace or "default",
+                "points": q.points,
+                "is_flagged": is_target_flagged,
+            })
+        except Exception:
+            pass
+
         should_run_setup = True
         if is_target_flagged and not force_setup:
             # Candidate switched back to an already attempted / flagged task.
@@ -484,15 +662,27 @@ class LabDeployer:
             print(" [PRESERVED FLAGGED WORK]")
 
         if should_run_setup and q.setup_script and q.setup_script.exists():
+            if q.target_context:
+                try:
+                    subprocess.run(
+                        ["kubectl", "config", "use-context", q.target_context],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=3,
+                    )
+                except Exception:
+                    pass
+            setup_env = os.environ.copy()
+            setup_env["KUBECTL_CONTEXT"] = q.target_context or "k3d-cka"
             try:
                 res = subprocess.run(
                     ["bash", str(q.setup_script)],
-                    env=os.environ.copy(),
+                    env=setup_env,
                     cwd=str(q.path),
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
-                    timeout=15,
+                    timeout=35,
                 )
                 if res.returncode == 0:
                     print(" [OK]")
@@ -504,6 +694,9 @@ class LabDeployer:
             pass
         else:
             print(" [READY]")
+
+        if progress_cb:
+            progress_cb("ready", f"Task {index + 1} Ready", 3, 3, "Ready for candidate input.")
 
         self.save_session(session)
         self.export_tasks_markdown(session)

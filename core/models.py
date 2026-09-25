@@ -65,6 +65,50 @@ class Question:
             return self.path / "solution.md"
         return None
 
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "domain": self.domain.value if hasattr(self.domain, "value") else str(self.domain),
+            "difficulty": self.difficulty.value if hasattr(self.difficulty, "value") else str(self.difficulty),
+            "points": self.points,
+            "target_context": self.target_context,
+            "description": self.description,
+            "namespace": self.namespace,
+            "cluster_scoped": self.cluster_scoped,
+            "breaking": self.breaking,
+            "chain_id": self.chain_id,
+            "chain_step": self.chain_step,
+            "depends_on": self.depends_on,
+            "preserve_state": self.preserve_state,
+            "tags": self.tags,
+            "grader_hint": self.grader_hint,
+            "path": str(self.path) if self.path else None,
+        }
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "Question":
+        return cls(
+            id=d["id"],
+            title=d.get("title", ""),
+            domain=Domain(d.get("domain", "troubleshooting")),
+            difficulty=Difficulty(d.get("difficulty", "medium")),
+            points=int(d.get("points", 3)),
+            target_context=d.get("target_context", "k3d-cka"),
+            description=d.get("description", ""),
+            namespace=d.get("namespace"),
+            cluster_scoped=bool(d.get("cluster_scoped", False)),
+            breaking=bool(d.get("breaking", False)),
+            chain_id=d.get("chain_id"),
+            chain_step=d.get("chain_step"),
+            depends_on=d.get("depends_on"),
+            preserve_state=bool(d.get("preserve_state", False)),
+            tags=d.get("tags", []),
+            grader_hint=d.get("grader_hint"),
+            path=Path(d["path"]) if d.get("path") else None,
+        )
+
+
 
 @dataclass
 class GradeResult:
@@ -96,6 +140,11 @@ class ExamSession:
     scores: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     flagged: List[str] = field(default_factory=list)
     scorecard: Optional[List[Dict[str, Any]]] = None
+    status: str = "active"          # "active" | "completed" | "expired" | "idle_timeout"
+    last_active_at: Optional[str] = None  # ISO8601 UTC of last candidate activity
+    candidate_token: Optional[str] = None  # Unique per-candidate URL token
+    owner_username: Optional[str] = None  # User account that owns this session
+    assigned_by: Optional[str] = None  # Admin/user that assigned this session
 
     @property
     def current_question(self) -> Optional[Question]:
@@ -116,4 +165,10 @@ class ExamSession:
             "scores": self.scores,
             "flagged": self.flagged,
             "scorecard": self.scorecard,
+            "status": self.status,
+            "last_active_at": self.last_active_at,
+            "candidate_token": self.candidate_token,
+            "owner_username": self.owner_username,
+            "assigned_by": self.assigned_by,
         }
+

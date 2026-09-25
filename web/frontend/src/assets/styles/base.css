@@ -1,0 +1,219 @@
+/*
+ * Base styles — the single global stylesheet.
+ *
+ * Tailwind CSS v4 is imported here (D-002). `tokens.css` remains the palette
+ * source of truth: the `@theme inline` block below maps the token variables into
+ * Tailwind's theme namespace, so generated utilities reference the runtime
+ * `var(--color-*)` values and keep working across `data-theme` dark/light.
+ * The project's own base rules are placed in Tailwind's `base` layer so utility
+ * classes (in the `utilities` layer) can override them normally.
+ */
+
+@import 'tailwindcss';
+@import './fonts.css';
+
+@theme inline {
+  /* Surfaces + text */
+  --color-app: var(--color-bg-app);
+  --color-surface: var(--color-surface);
+  --color-elevated: var(--color-elevated);
+  --color-hover: var(--color-hover);
+  --color-border: var(--color-border);
+  --color-border-strong: var(--color-border-strong);
+  --color-text: var(--color-text);
+  --color-text-muted: var(--color-text-muted);
+  --color-text-dim: var(--color-text-dim);
+
+  /* Accent (single indigo family) */
+  --color-accent: var(--color-accent);
+  --color-accent-hover: var(--color-accent-hover);
+  --color-accent-active: var(--color-accent-active);
+  --color-accent-solid: var(--color-accent-solid);
+  --color-accent-solid-hover: var(--color-accent-solid-hover);
+  --color-accent-text: var(--color-accent-text);
+  --color-accent-contrast: var(--color-accent-contrast);
+
+  /* Semantic swatches + AA-safe text variants */
+  --color-success: var(--color-success);
+  --color-warning: var(--color-warning);
+  --color-danger: var(--color-danger);
+  --color-info: var(--color-info);
+  --color-success-text: var(--color-success-text);
+  --color-warning-text: var(--color-warning-text);
+  --color-danger-text: var(--color-danger-text);
+  --color-info-text: var(--color-info-text);
+}
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  html,
+  body,
+  #app {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    font-weight: var(--font-weight-regular);
+    line-height: var(--leading-normal);
+    color: var(--color-text);
+    background-color: var(--color-bg-app);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    transition:
+      background-color var(--transition-base),
+      color var(--transition-base);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    margin: 0 0 var(--space-3);
+    font-weight: var(--font-weight-semibold);
+    line-height: var(--leading-tight);
+    color: var(--color-text);
+  }
+
+  h1 {
+    font-size: var(--text-2xl);
+  }
+  h2 {
+    font-size: var(--text-xl);
+  }
+  h3 {
+    font-size: var(--text-lg);
+  }
+  h4 {
+    font-size: var(--text-md);
+  }
+  h5,
+  h6 {
+    font-size: var(--text-base);
+  }
+
+  p,
+  ul,
+  ol {
+    margin: 0 0 var(--space-3);
+  }
+
+  ul,
+  ol {
+    padding-left: var(--space-5);
+  }
+
+  a {
+    color: var(--color-accent-text);
+    text-decoration: none;
+    border-radius: var(--radius-sm);
+  }
+
+  a:hover {
+    text-decoration: underline;
+  }
+
+  code,
+  kbd,
+  samp,
+  pre {
+    font-family: var(--font-mono);
+    font-size: 0.95em;
+  }
+
+  pre {
+    margin: 0 0 var(--space-3);
+    padding: var(--space-3);
+    overflow: auto;
+    color: var(--color-text);
+    background-color: var(--color-elevated);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+  }
+
+  hr {
+    border: 0;
+    border-top: 1px solid var(--color-border);
+  }
+
+  img,
+  svg {
+    vertical-align: middle;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+
+  ::selection {
+    color: var(--color-text);
+    background-color: var(--color-accent-subtle);
+  }
+
+  :focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring-color);
+    outline-offset: var(--focus-ring-offset);
+  }
+
+  /*
+   * Consistent, slim token-coloured scrollbars across the app (Firefox uses the
+   * standard properties; Chromium/WebKit the pseudo-elements). Keeps long lists
+   * and the xterm viewport from showing the default OS chrome.
+   */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border-strong) transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background-color: var(--color-border-strong);
+    border: 2px solid transparent;
+    border-radius: var(--radius-full);
+    background-clip: content-box;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: var(--color-text-dim);
+  }
+}
+
+/* Minimal shared helpers used by later components. */
+@layer components {
+  .surface {
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+  }
+
+  .muted {
+    color: var(--color-text-muted);
+  }
+}

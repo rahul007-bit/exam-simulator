@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.vite/
+test-results/
+playwright-report/
+src/api/schema.d.ts
+*.local
+bun.lock
+bun.lockb
