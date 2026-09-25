@@ -107,7 +107,35 @@ async def _session_timer_broadcaster():
 async def _idle_session_reaper():
     """Auto-terminates any live session idle for IDLE_TIMEOUT_MINUTES with no activity."""
     while True:
-        await asyncio.sleep(60)  # Check every minute
+        await asyncio.sleep(30)  # Check every minute
+
+        # Orphan sweep: an id registered in active_sessions without a live
+        # session record (e.g. session:key expired after 24h TTL) can never be
+        # loaded — the loop below `continue`s over it forever, so its k3d
+        # cluster and desktop container leak indefinitely. The session record
+        # lives in Redis under session:{sid}; archive history lives under
+        # history:session:{sid}. Anything with neither is unownable.
+        try:
+            client = redis_bus.get_sync_client()
+            orphans = [
+                sid
+                for sid in redis_bus.list_active_session_ids()
+                if not client.exists(f"session:{sid}", f"history:session:{sid}")
+            ]
+        except Exception:
+            orphans = []
+        if orphans:
+            print(f"[OrphanSweep] Reclaiming sessions with no record: {orphans}", flush=True)
+            loop = asyncio.get_running_loop()
+            # teardown_session deregisters + cleans the Redis keys itself.
+            def _teardown_all(ids):
+                for sid in ids:
+                    try:
+                        orchestrator.teardown_session(sid)
+                    except Exception as ex:
+                        print(f"[OrphanSweep] teardown {sid} failed: {ex}", flush=True)
+            await loop.run_in_executor(None, _teardown_all, list(orphans))
+
         try:
             for sid in redis_bus.list_active_session_ids():
                 session = deployer.load_session(loader, sid)
