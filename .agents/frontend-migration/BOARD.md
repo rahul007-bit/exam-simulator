@@ -2,7 +2,7 @@
 
 > GENERATED FILE - do not edit by hand.
 > Canonical data: `.agents/frontend-migration/tasks.json`.
-> Regenerate with `python scripts/agents_board.py`. Last generated: 2026-09-25T03:40:24Z.
+> Regenerate with `python scripts/agents_board.py`. Last generated: 2026-09-25T04:09:34Z.
 
 **Program:** `frontend-migration`  
 **Branch:** `feature/frontend-vue-migration`  
@@ -11,10 +11,10 @@
 
 | Status | Count |
 | :--- | ---: |
-| todo | 6 |
+| todo | 5 |
 | claimed | 0 |
 | in-review | 0 |
-| verified | 42 |
+| verified | 43 |
 | blocked | 0 |
 | rejected | 0 |
 | **total** | **48** |
@@ -91,7 +91,7 @@
 | `FE-041` | Self-host fonts and dependencies (offline) | FE-040 | implementer-fe041 | verified | independent-agent | .agents/fe041-043-verifier/EVIDENCE.md |
 | `FE-042` | Playwright E2E and axe accessibility | FE-040 | implementer-fe042 | verified | independent-agent | .agents/fe041-043-verifier/EVIDENCE.md |
 | `FE-043` | Update docs (README, HANDOVER, PLATFORM_SETUP) | FE-040 | implementer-fe043 | verified | independent-agent | .agents/fe041-043-verifier/EVIDENCE.md |
-| `FE-044` | Full regression against real backend | FE-042 | - | todo | independent-agent | - |
+| `FE-044` | Full regression against real backend | FE-042 | - | verified | independent-agent | .agents/FE-044-regression/EVIDENCE.md |
 | `FE-V5` | M5 gate - victory audit | FE-040, FE-041, FE-042, FE-043, FE-044 | - | todo | - | - |
 
 ### Future (FS)

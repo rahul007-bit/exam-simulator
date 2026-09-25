@@ -1402,7 +1402,7 @@
         "FE-042"
       ],
       "owner": null,
-      "status": "todo",
+      "status": "verified",
       "verifier": "independent-agent",
       "deliverable": "end-to-end regression vs platform host: candidate full exam + admin lifecycle",
       "acceptance": [
@@ -1414,7 +1414,7 @@
         "run against platform host",
         "capture scorecard + logs"
       ],
-      "evidence": null,
+      "evidence": ".agents/FE-044-regression/EVIDENCE.md",
       "notes": "Precedes FE-V5 victory audit.",
       "tests": [
         {
