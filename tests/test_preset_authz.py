@@ -1,9 +1,11 @@
 """Authorization tests for the preset catalog surface (FS-008 / D-010).
 
-Enumeration of presets is admin-only at the API level. These tests assert, at
-both source and behavior level, that the `get_presets`, `select_preset` and
-`generate_preset` handlers gate on `require_admin` before doing any work, so a
-non-admin request receives HTTP 401.
+Catalog surface (list/select) is admin-only at the API level. `generate_preset`
+is intentionally relaxed to `require_user` (any signed-in user) by FS-003b /
+FS-006 — custom exam building is a candidate feature, not an admin one. These
+tests assert, at both source and behavior level, that each handler gates on the
+correct guard before doing any work, so an unauthenticated request receives
+HTTP 401.
 """
 import ast
 import sys
@@ -16,7 +18,12 @@ if str(ROOT) not in sys.path:
 
 PRESETS_PATH = ROOT / "web" / "api" / "routes" / "presets.py"
 
-GATED_HANDLERS = ("get_presets", "select_preset", "generate_preset")
+# handler -> expected auth guard called before any work
+GATED_HANDLERS = {
+    "get_presets": "require_admin",
+    "select_preset": "require_admin",
+    "generate_preset": "require_user",  # FS-003b: any signed-in user
+}
 
 
 def _handler_nodes():
@@ -28,11 +35,11 @@ def _handler_nodes():
     }
 
 
-def _calls_require_admin(func):
+def _calls_guard(func, guard):
     for node in ast.walk(func):
         if isinstance(node, ast.Call):
             target = node.func
-            if isinstance(target, ast.Name) and target.id == "require_admin":
+            if isinstance(target, ast.Name) and target.id == guard:
                 return True
     return False
 
@@ -44,14 +51,14 @@ class PresetAuthzSourceTest(unittest.TestCase):
             with self.subTest(handler=name):
                 self.assertIn(name, handlers, f"{name} handler missing from presets.py")
 
-    def test_handlers_call_require_admin(self):
+    def test_handlers_call_expected_guard(self):
         handlers = _handler_nodes()
-        for name in GATED_HANDLERS:
+        for name, guard in GATED_HANDLERS.items():
             with self.subTest(handler=name):
                 self.assertIn(name, handlers)
                 self.assertTrue(
-                    _calls_require_admin(handlers[name]),
-                    f"{name} does not call require_admin",
+                    _calls_guard(handlers[name], guard),
+                    f"{name} does not call {guard}",
                 )
 
     def test_handlers_accept_request(self):
@@ -61,7 +68,6 @@ class PresetAuthzSourceTest(unittest.TestCase):
                 self.assertIn(name, handlers)
                 args = [a.arg for a in handlers[name].args.args]
                 self.assertIn("request", args, f"{name} lacks a request parameter")
-
 
 try:
     from fastapi import HTTPException
